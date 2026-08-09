@@ -14,7 +14,11 @@ from agent_continuity.kernel.capabilities import (
 )
 from agent_continuity.kernel.model import Digest, JsonObject, StoredRecord
 from agent_continuity.kernel.paths import PathIdentityV1, path_identity_payload
-from agent_continuity.kernel.records import make_record, require_digest
+from agent_continuity.kernel.records import (
+    make_record,
+    require_digest,
+    require_public_component,
+)
 
 _OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
@@ -50,6 +54,23 @@ class TargetIdentityV1:
     capabilities: tuple[CapabilityClaimV1, ...]
 
     def __post_init__(self) -> None:
+        if type(self.adapter_id) is not str or type(self.adapter_version) is not str:
+            raise CanonicalJSONError("target adapter identity must use plain strings")
+        require_public_component(self.adapter_id, field="target adapter identifier")
+        require_public_component(self.adapter_version, field="target adapter version")
+        for field_name, value in (
+            ("platform_id", self.platform_id),
+            ("filesystem_id", self.filesystem_id),
+        ):
+            if (
+                type(value) is not str
+                or not value
+                or len(value) > 128
+                or any(ord(character) < 0x20 for character in value)
+            ):
+                raise CanonicalJSONError(f"target {field_name} is invalid")
+        if type(self.head_oid) is not str or type(self.tree_oid) is not str:
+            raise CanonicalJSONError("target Git object IDs must be plain strings")
         if _OID_RE.fullmatch(self.head_oid) is None:
             raise CanonicalJSONError("target HEAD object ID is invalid")
         if _OID_RE.fullmatch(self.tree_oid) is None:
@@ -63,9 +84,19 @@ class TargetIdentityV1:
             self.ignore_provenance_digest,
             self.physical_root_fingerprint,
         ):
+            if type(value) is not str:
+                raise CanonicalJSONError("target digest fields must be plain strings")
             require_digest(value)
         if self.sanitized_remote_identity_digest is not None:
+            if type(self.sanitized_remote_identity_digest) is not str:
+                raise CanonicalJSONError(
+                    "remote identity digest must be a plain string"
+                )
             require_digest(self.sanitized_remote_identity_digest)
+        if type(self.capabilities) is not tuple or any(
+            type(item) is not CapabilityClaimV1 for item in self.capabilities
+        ):
+            raise CanonicalJSONError("target capabilities must be an immutable tuple")
         ordered = tuple(sorted(self.capabilities, key=lambda item: item.name))
         if self.capabilities != ordered:
             raise CanonicalJSONError("capability claims must be ordered by name")

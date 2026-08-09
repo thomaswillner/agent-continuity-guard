@@ -8,7 +8,13 @@ import pytest
 from jsonschema import Draft202012Validator, ValidationError
 from referencing import Registry, Resource
 
-from agent_continuity.kernel.canonical import canonical_bytes
+from agent_continuity.capture.base import TargetIdentityV1
+from agent_continuity.kernel.canonical import (
+    CanonicalJSONError,
+    canonical_bytes,
+    digest_bytes,
+)
+from agent_continuity.kernel.capabilities import CapabilityClaimV1
 from tools import verify_schemas
 
 SCHEMA_ROOT = Path(__file__).parents[2] / "schemas" / "v1"
@@ -97,16 +103,8 @@ def test_file_path_scope_cannot_use_null_root() -> None:
         validator.validate({"kind": "file", "path": None})
 
 
-def test_capture_schemas_accept_strict_golden_records() -> None:
-    schemas = _schemas()
-    expected_names = {
-        "capability-claim.schema.json",
-        "instruction-manifest.schema.json",
-        "target-identity.schema.json",
-    }
-    assert expected_names <= schemas.keys()
-    registry = _registry(schemas)
-    digest = "sha256:" + "2" * 64
+def _capture_schema_goldens() -> dict[str, dict[str, Any]]:
+    digest = "sha256:" + "1" * 64
     capability = {
         "adapter_id": "acg-git",
         "adapter_version": "1",
@@ -120,7 +118,7 @@ def test_capture_schemas_accept_strict_golden_records() -> None:
         "raw_b64": "QUdFTlRTLm1k",
         "segment_offsets": [0],
     }
-    positives = {
+    return {
         "capability-claim.schema.json": capability,
         "instruction-manifest.schema.json": {
             "files": [
@@ -145,11 +143,100 @@ def test_capture_schemas_accept_strict_golden_records() -> None:
             "worktree_manifest_digest": digest,
         },
     }
+
+
+def test_capture_schemas_accept_strict_golden_records() -> None:
+    schemas = _schemas()
+    expected_names = {
+        "capability-claim.schema.json",
+        "instruction-manifest.schema.json",
+        "target-identity.schema.json",
+    }
+    assert expected_names <= schemas.keys()
+    registry = _registry(schemas)
+    positives = _capture_schema_goldens()
     for name, positive in positives.items():
         validator = Draft202012Validator(schemas[name], registry=registry)
         validator.validate(positive)
         with pytest.raises(ValidationError):
             validator.validate({**positive, "unexpected": True})
+
+
+def test_capture_goldens_have_complete_independent_tool_parity() -> None:
+    tool_goldens = verify_schemas._goldens()
+    capture_goldens = _capture_schema_goldens()
+
+    assert {name: tool_goldens[name] for name in capture_goldens} == capture_goldens
+
+
+def test_capability_schema_requires_evidence_when_status_is_proven() -> None:
+    schemas = _schemas()
+    validator = Draft202012Validator(schemas["capability-claim.schema.json"])
+    invalid = {
+        "adapter_id": "acg-git",
+        "adapter_version": "1",
+        "evidence_digest": None,
+        "name": "git_immutable_objects",
+        "status": "proven",
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(invalid)
+
+
+def test_target_schema_rejects_duplicate_capability_records() -> None:
+    schemas = _schemas()
+    registry = _registry(schemas)
+    positive = _capture_schema_goldens()["target-identity.schema.json"]
+    capability = positive["capabilities"][0]
+    invalid = {**positive, "capabilities": [capability, capability]}
+
+    with pytest.raises(ValidationError):
+        Draft202012Validator(
+            schemas["target-identity.schema.json"], registry=registry
+        ).validate(invalid)
+
+
+def test_runtime_target_rejects_schema_invalid_public_strings() -> None:
+    digest = digest_bytes(b"value")
+    capability = CapabilityClaimV1(
+        name="git_immutable_objects",
+        status="proven",
+        adapter_id="acg-git",
+        adapter_version="1",
+        evidence_digest=digest,
+    )
+
+    with pytest.raises(CanonicalJSONError):
+        TargetIdentityV1(
+            adapter_id="acg-git",
+            adapter_version="1",
+            sanitized_remote_identity_digest=None,
+            head_oid="a" * 40,
+            tree_oid="b" * 40,
+            index_manifest_digest=digest,
+            worktree_manifest_digest=digest,
+            inventory_digest=digest,
+            status_digest=digest,
+            git_object_manifest_digest=digest,
+            ignore_provenance_digest=digest,
+            platform_id="bad\nplatform",
+            filesystem_id="posix:darwin",
+            physical_root_fingerprint=digest,
+            capabilities=(capability,),
+        )
+
+
+def test_schema_verifier_enforces_capability_name_order_and_uniqueness() -> None:
+    semantic_validate = getattr(verify_schemas, "_semantic_validate", None)
+    assert callable(semantic_validate)
+    target = _capture_schema_goldens()["target-identity.schema.json"]
+    first = target["capabilities"][0]
+    second = {**first, "name": "descriptor_pinned_reads"}
+    unordered = {**target, "capabilities": [first, second]}
+
+    with pytest.raises(verify_schemas.SchemaVerificationError):
+        semantic_validate("target-identity.schema.json", unordered)
 
 
 def _valid_tool_schema(*, schema_id: str, record_type: str) -> dict[str, Any]:

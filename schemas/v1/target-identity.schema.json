@@ -21,7 +21,9 @@
       "items": {
         "$ref": "https://agent-continuity-guard.dev/schemas/v1/capability-claim.schema.json"
       },
-      "type": "array"
+      "type": "array",
+      "uniqueItems": true,
+      "x-acg-sorted-unique-by": "name"
     },
     "filesystem_id": {
       "maxLength": 128,

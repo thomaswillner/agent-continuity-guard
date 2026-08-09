@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import agent_continuity.store.paths as state_paths
 from agent_continuity.store.paths import (
     StatePathError,
     assert_external_state,
@@ -69,3 +70,59 @@ def test_relative_state_override_is_invalid(
     monkeypatch.setenv("ACG_STATE_HOME", "relative/environment")
     with pytest.raises(StatePathError):
         resolve_state_home(None)
+
+
+def test_unresolved_parent_components_are_rejected_before_creation(
+    tmp_path: Path,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    candidate = outside / "new" / ".." / ".." / repo.root.name / "state"
+
+    with pytest.raises(StatePathError):
+        assert_external_state(repo.root, repo.git_dir, candidate)
+
+
+def test_pinned_state_creator_returns_secure_handle_and_mode(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    candidate = tmp_path / "secure-state"
+    creator = getattr(state_paths, "open_external_state_root", None)
+    assert callable(creator)
+
+    with creator(repo.root, repo.git_dir, candidate) as handle:
+        assert handle.path == candidate
+        assert candidate.is_dir()
+        assert os.fstat(handle.dir_fd).st_ino == candidate.stat().st_ino
+        assert candidate.stat().st_mode & 0o777 == 0o700
+
+
+def test_state_ancestor_swap_during_creation_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    candidate = outside / "state"
+    creator = getattr(state_paths, "open_external_state_root", None)
+    assert callable(creator)
+    real_mkdir = os.mkdir
+    swapped = False
+
+    def swapping_mkdir(
+        path: str | bytes,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal swapped
+        if os.fsdecode(path) == "state" and not swapped:
+            swapped = True
+            outside.rename(tmp_path / "outside-original")
+            os.symlink(repo.root, outside)
+        real_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "mkdir", swapping_mkdir)
+    with pytest.raises(StatePathError):
+        creator(repo.root, repo.git_dir, candidate)
+    assert not (repo.root / "state").exists()

@@ -59,6 +59,30 @@ def _registered_schemas(schemas: dict[str, dict[str, Any]]) -> dict[str, str]:
     return registered
 
 
+def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
+    if (
+        name == "capability-claim.schema.json"
+        and instance.get("status") == "proven"
+        and instance.get(
+            "evidence_digest"
+        )
+        is None
+    ):
+        raise SchemaVerificationError("invalid_golden")
+    if name == "target-identity.schema.json":
+        capabilities = instance.get("capabilities")
+        if not isinstance(capabilities, list):
+            raise SchemaVerificationError("invalid_golden")
+        names = [
+            item.get("name") if isinstance(item, dict) else None
+            for item in capabilities
+        ]
+        if any(type(item) is not str for item in names):
+            raise SchemaVerificationError("invalid_golden")
+        if names != sorted(names) or len(set(names)) != len(names):
+            raise SchemaVerificationError("invalid_golden")
+
+
 def _goldens() -> dict[str, dict[str, Any]]:
     digest = "sha256:" + "1" * 64
     capability = {
@@ -148,6 +172,7 @@ def main() -> int:
             validator = Draft202012Validator(schemas[name], registry=registry)
             try:
                 validator.validate(positive)
+                _semantic_validate(name, positive)
             except Exception as error:
                 raise SchemaVerificationError("invalid_golden") from error
             try:
