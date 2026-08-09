@@ -4,7 +4,6 @@ import builtins
 import hashlib
 import json
 import os
-import shutil
 import stat
 import struct
 import subprocess
@@ -15,13 +14,12 @@ from typing import cast
 
 import pytest
 
-import agent_continuity.capture.git as git_capture
-from agent_continuity.capture.base import (
+from agent_continuity.capture import (
     CaptureRequestError,
     CaptureUnknownError,
+    GitTargetAdapter,
     target_identity_payload,
 )
-from agent_continuity.capture.git import GitTargetAdapter
 from agent_continuity.kernel.canonical import canonical_bytes, digest_bytes
 from tests.helpers.git_repo import (
     GitExecutableWrapper,
@@ -53,6 +51,36 @@ def install_symbolic_head_chain(
     for current, following in pairwise(names):
         (refs / current).write_text(f"ref: refs/heads/{following}\n", encoding="ascii")
     (refs / names[-1]).write_text(f"{terminal_oid}\n", encoding="ascii")
+
+
+def install_symbolic_ref_paths(
+    repo: GitRepo, ref_paths: tuple[str, ...], terminal_oid: str
+) -> None:
+    if not ref_paths:
+        raise ValueError("symbolic chain requires at least one ref path")
+    (repo.git_dir / "HEAD").write_text(
+        f"ref: {ref_paths[0]}\n", encoding="ascii"
+    )
+    for current, following in pairwise(ref_paths):
+        path = repo.git_dir / current
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"ref: {following}\n", encoding="ascii")
+    terminal = repo.git_dir / ref_paths[-1]
+    terminal.parent.mkdir(parents=True, exist_ok=True)
+    terminal.write_text(f"{terminal_oid}\n", encoding="ascii")
+
+
+def make_single_file_repo(base: Path) -> GitRepo:
+    root = base / "single-file-target"
+    root.mkdir()
+    repo = GitRepo(root)
+    repo.git("init", "-q")
+    repo.git("config", "user.name", "Synthetic Test")
+    repo.git("config", "user.email", "synthetic@example.invalid")
+    (root / "only.txt").write_text("only record\n", encoding="utf-8")
+    repo.git("add", "only.txt")
+    repo.git("commit", "-q", "-m", "single record")
+    return repo
 
 
 def test_clean_git_capture_is_deterministic_and_read_only(tmp_path: Path) -> None:
@@ -168,69 +196,84 @@ def test_capture_rejects_mutation_after_initial_tree_observation(
     mutation: str,
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
-    mutated = False
-
-    def run_with_mutation(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        nonlocal mutated
-        output = original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-        if args and args[0] == "ls-tree" and not mutated:
-            mutated = True
-            if mutation == "worktree":
-                (repo.root / "README.md").write_text("mutated\n", encoding="utf-8")
-            elif mutation == "index":
-                (repo.root / "new.txt").write_text("new\n", encoding="utf-8")
-                repo.git("add", "new.txt")
-            else:
-                (repo.root / "README.md").write_text("new commit\n", encoding="utf-8")
-                repo.git("add", "README.md")
-                repo.git("commit", "-q", "-m", "move head")
-        return output
-
-    monkeypatch.setattr(adapter, "_run", run_with_mutation)
+    original_head = repo.git("rev-parse", "HEAD")
+    wrapper = make_git_executable_wrapper(tmp_path)
+    if mutation == "worktree":
+        actions = [
+            {
+                "kind": "write_text",
+                "path": os.fspath(repo.root / "README.md"),
+                "content": "mutated\n",
+            }
+        ]
+    elif mutation == "index":
+        actions = [
+            {
+                "kind": "write_text",
+                "path": os.fspath(repo.root / "new.txt"),
+                "content": "new\n",
+            },
+            {
+                "kind": "git",
+                "args": ["-C", os.fspath(repo.root), "add", "new.txt"],
+            },
+        ]
+    else:
+        actions = [
+            {
+                "kind": "write_text",
+                "path": os.fspath(repo.root / "README.md"),
+                "content": "new commit\n",
+            },
+            {
+                "kind": "git",
+                "args": ["-C", os.fspath(repo.root), "add", "README.md"],
+            },
+            {
+                "kind": "git",
+                "args": [
+                    "-C",
+                    os.fspath(repo.root),
+                    "commit",
+                    "-q",
+                    "-m",
+                    "move head",
+                ],
+            },
+        ]
+    wrapper.configure(
+        trigger_command="ls-tree",
+        once=True,
+        after_actions=actions,
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
     with pytest.raises(CaptureUnknownError):
-        adapter.capture((b"AGENTS.md",))
+        GitTargetAdapter(repo.root).capture((b"AGENTS.md",))
+
+    assert wrapper.state_path.read_text(encoding="ascii") == "1"
+    if mutation == "worktree":
+        assert (repo.root / "README.md").read_text(encoding="utf-8") == "mutated\n"
+    elif mutation == "index":
+        assert b"new.txt" in repo.git("ls-files")
+    else:
+        assert repo.git("rev-parse", "HEAD") != original_head
 
 
 def test_tree_listing_is_pinned_to_sampled_tree_oid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
-    tree_arguments: list[tuple[str, ...]] = []
+    wrapper = make_git_executable_wrapper(tmp_path)
+    use_git_wrapper(monkeypatch, wrapper)
+    snapshot = GitTargetAdapter(repo.root).capture(())
+    tree_invocations = [
+        invocation for invocation in wrapper.invocations() if "ls-tree" in invocation
+    ]
 
-    def recording_run(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        if args and args[0] == "ls-tree":
-            tree_arguments.append(args)
-        return original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-
-    monkeypatch.setattr(adapter, "_run", recording_run)
-    snapshot = adapter.capture(())
-
-    assert tree_arguments
+    assert tree_invocations
     assert all(
-        arguments[-1] == snapshot.target.tree_oid for arguments in tree_arguments
+        invocation[-1] == snapshot.target.tree_oid for invocation in tree_invocations
     )
 
 
@@ -238,33 +281,29 @@ def test_capture_rechecks_index_after_first_direct_index_observation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
-    index_count = 0
-
-    def mutate_after_first_index_observation(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        nonlocal index_count
-        output = original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-        if args and args[0] == "ls-files":
-            index_count += 1
-            if index_count == 1:
-                (repo.root / "late.txt").write_text("late\n", encoding="utf-8")
-                repo.git("add", "late.txt")
-        return output
-
-    monkeypatch.setattr(adapter, "_run", mutate_after_first_index_observation)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        trigger_command="ls-files",
+        once=True,
+        after_actions=[
+            {
+                "kind": "write_text",
+                "path": os.fspath(repo.root / "late.txt"),
+                "content": "late\n",
+            },
+            {
+                "kind": "git",
+                "args": ["-C", os.fspath(repo.root), "add", "late.txt"],
+            },
+        ],
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
     with pytest.raises(CaptureUnknownError):
-        adapter.capture(())
+        GitTargetAdapter(repo.root).capture(())
+
+    assert wrapper.state_path.read_text(encoding="ascii") == "1"
+    assert b"late.txt" in repo.git("ls-files")
 
 
 def test_capture_rejects_ordinary_leaf_rename_swap(
@@ -354,69 +393,64 @@ def test_intermediate_symlink_replacement_fails_closed(
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "guide.txt").write_text("external\n", encoding="utf-8")
-    adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
-    mutated = False
+    original_docs = tmp_path / "original-docs"
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        trigger_command="ls-tree",
+        once=True,
+        after_actions=[
+            {
+                "kind": "rename",
+                "source": os.fspath(repo.root / "docs"),
+                "target": os.fspath(original_docs),
+            },
+            {
+                "kind": "symlink",
+                "target": os.fspath(outside),
+                "path": os.fspath(repo.root / "docs"),
+            },
+        ],
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
-    def replace_directory(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        nonlocal mutated
-        output = original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-        if args and args[0] == "ls-tree" and not mutated:
-            mutated = True
-            shutil.move(repo.root / "docs", tmp_path / "original-docs")
-            os.symlink(outside, repo.root / "docs")
-        return output
-
-    monkeypatch.setattr(adapter, "_run", replace_directory)
     with pytest.raises(CaptureUnknownError):
-        adapter.capture(())
+        GitTargetAdapter(repo.root).capture(())
+
+    assert original_docs.is_dir()
+    assert (repo.root / "docs").is_symlink()
 
 
 def test_root_replacement_is_unknown_not_a_request_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
-    replaced = False
+    original_root = tmp_path / "original-root"
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        trigger_command="ls-tree",
+        once=True,
+        after_actions=[
+            {
+                "kind": "rename",
+                "source": os.fspath(repo.root),
+                "target": os.fspath(original_root),
+            },
+            {"kind": "mkdir", "path": os.fspath(repo.root)},
+        ],
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
-    def replace_root(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        nonlocal replaced
-        output = original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-        if args and args[0] == "ls-tree" and not replaced:
-            replaced = True
-            repo.root.rename(tmp_path / "original-root")
-            repo.root.mkdir()
-        return output
-
-    monkeypatch.setattr(adapter, "_run", replace_root)
     with pytest.raises(CaptureUnknownError):
-        adapter.capture(())
+        GitTargetAdapter(repo.root).capture(())
+
+    assert original_root.is_dir()
+    assert not (repo.root / ".git").exists()
 
 
 def test_git_observation_uses_pinned_root_descriptor_during_path_swap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
     expected_head = repo.git("rev-parse", "HEAD^{commit}")
 
     replacement_base = tmp_path / "replacement-base"
@@ -430,33 +464,41 @@ def test_git_observation_uses_pinned_root_descriptor_during_path_swap(
     assert replacement.git("rev-parse", "HEAD^{commit}") != expected_head
 
     original_location = tmp_path / "original-target"
-    original_run_at = adapter._run_at
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        trigger_command="rev-parse",
+        once=True,
+        before_actions=[
+            {
+                "kind": "rename",
+                "source": os.fspath(repo.root),
+                "target": os.fspath(original_location),
+            },
+            {
+                "kind": "rename",
+                "source": os.fspath(replacement.root),
+                "target": os.fspath(repo.root),
+            },
+        ],
+        after_actions=[
+            {
+                "kind": "rename",
+                "source": os.fspath(repo.root),
+                "target": os.fspath(replacement.root),
+            },
+            {
+                "kind": "rename",
+                "source": os.fspath(original_location),
+                "target": os.fspath(repo.root),
+            },
+        ],
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
-    def run_during_path_swap(
-        target: Path | int,
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        repo.root.rename(original_location)
-        replacement.root.rename(repo.root)
-        try:
-            return original_run_at(
-                target,
-                args,
-                allowed_codes=allowed_codes,
-                input_data=input_data,
-            )
-        finally:
-            repo.root.rename(replacement.root)
-            original_location.rename(repo.root)
+    snapshot = GitTargetAdapter(repo.root).capture(())
 
-    monkeypatch.setattr(adapter, "_run_at", run_during_path_swap)
-
-    observed_head = adapter._run(("rev-parse", "HEAD^{commit}"))
-
-    assert observed_head == expected_head
+    assert snapshot.target.head_oid.encode("ascii") + b"\n" == expected_head
+    assert repo.git("rev-parse", "HEAD^{commit}") == expected_head
 
 
 def test_symlink_swap_between_observations_is_unknown(
@@ -587,22 +629,39 @@ def test_constructor_classifies_true_non_repository_as_request_error(
         "helper with secret",
     ],
 )
-def test_remote_sanitizer_rejects_ambiguous_or_helper_forms(remote: str) -> None:
-    with pytest.raises(CaptureRequestError):
-        git_capture._sanitize_remote(remote)
+def test_public_capture_rejects_ambiguous_or_helper_remotes(
+    tmp_path: Path, remote: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    repo.git("config", "--add", "remote.origin.url", remote)
+
+    with pytest.raises(CaptureUnknownError) as captured:
+        GitTargetAdapter(repo.root).capture(())
+    assert remote not in str(captured.value)
 
 
 def test_missing_git_object_is_unknown_not_request_error(tmp_path: Path) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
+    oid = repo.git("rev-parse", "HEAD:AGENTS.md").strip().decode("ascii")
+    loose_object = repo.git_dir / "objects" / oid[:2] / oid[2:]
+    assert loose_object.is_file()
+    loose_object.unlink()
 
     with pytest.raises(CaptureUnknownError):
-        adapter._run(("cat-file", "blob", "0" * 40))
+        GitTargetAdapter(repo.root).capture((b"AGENTS.md",))
 
 
-def test_malformed_git_tree_bytes_are_sanitized_unknown() -> None:
+def test_malformed_git_tree_bytes_are_sanitized_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    malformed = b"\xff blob " + b"a" * 40 + b"\tpath\x00"
+    wrapper.configure(trigger_command="ls-tree", stdout_hex=malformed.hex())
+    use_git_wrapper(monkeypatch, wrapper)
+
     with pytest.raises(CaptureUnknownError):
-        GitTargetAdapter._parse_tree(b"\xff blob " + b"a" * 40 + b"\tpath\x00")
+        GitTargetAdapter(repo.root).capture(())
 
 
 def test_linked_worktree_binds_common_exclude_provenance(tmp_path: Path) -> None:
@@ -753,7 +812,6 @@ def test_filter_injected_after_eligibility_check_never_executes(
     trigger_command: str,
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
     sentinel = tmp_path / f"late-{driver}-executed"
     program = tmp_path / f"late-{driver}.sh"
     if driver == "clean":
@@ -762,38 +820,37 @@ def test_filter_injected_after_eligibility_check_never_executes(
         body = f"#!/bin/sh\nprintf executed > '{sentinel}'\nexit 1\n"
     program.write_text(body, encoding="utf-8")
     program.chmod(0o700)
-    original_run = adapter._run
-    injected = False
+    trigger_occurrence = 4 if trigger_command == "rev-parse" else 1
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        trigger_command=trigger_command,
+        trigger_occurrence=trigger_occurrence,
+        once=True,
+        after_actions=[
+            {
+                "kind": "write_text",
+                "path": os.fspath(repo.root / ".gitattributes"),
+                "content": "README.md filter=probe\n",
+            },
+            {
+                "kind": "git",
+                "args": [
+                    "-C",
+                    os.fspath(repo.root),
+                    "config",
+                    f"filter.probe.{driver}",
+                    os.fspath(program),
+                ],
+            },
+        ],
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
-    def inject_after_selected_git_phase(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        nonlocal injected
-        output = original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-        if args and args[0] == trigger_command and not injected:
-            injected = True
-            (repo.root / ".gitattributes").write_text(
-                "README.md filter=probe\n", encoding="utf-8"
-            )
-            repo.git("config", f"filter.probe.{driver}", os.fspath(program))
-            metadata = (repo.root / "README.md").stat()
-            os.utime(
-                repo.root / "README.md",
-                ns=(metadata.st_atime_ns, metadata.st_mtime_ns + 1_000_000_000),
-            )
-        return output
-
-    monkeypatch.setattr(adapter, "_run", inject_after_selected_git_phase)
     with pytest.raises(CaptureUnknownError):
-        adapter.capture(())
-    assert injected
+        GitTargetAdapter(repo.root).capture(())
+
+    assert int(wrapper.state_path.read_text(encoding="ascii")) >= trigger_occurrence
+    assert (repo.root / ".gitattributes").is_file()
     assert not sentinel.exists()
 
 
@@ -941,26 +998,15 @@ def test_dual_object_format_is_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        match_args=["rev-parse", "--show-object-format=input"],
+        stdout_text="sha1 sha256\n",
+    )
+    use_git_wrapper(monkeypatch, wrapper)
 
-    def report_dual_format(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        if args == ("rev-parse", "--show-object-format=input"):
-            return b"sha1 sha256\n"
-        return original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-
-    monkeypatch.setattr(adapter, "_run", report_dual_format)
     with pytest.raises(CaptureUnknownError):
-        adapter.capture(())
+        GitTargetAdapter(repo.root).capture(())
 
 
 def test_capture_rejects_excessive_repository_depth(tmp_path: Path) -> None:
@@ -1366,3 +1412,455 @@ def test_valid_push_remote_contributes_to_remote_identity_digest(
         before.target.sanitized_remote_identity_digest
         != after.target.sanitized_remote_identity_digest
     )
+
+
+@pytest.mark.parametrize("command", ["ls-tree", "ls-files"])
+@pytest.mark.parametrize(
+    "frame",
+    ["missing-terminal", "extra-terminal", "interior-empty", "lone-nul"],
+)
+def test_every_malformed_git_nul_frame_is_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    frame: str,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(trigger_command=command, nul_frame=frame)
+    use_git_wrapper(monkeypatch, wrapper)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_valid_single_record_git_nul_frames_are_clean(tmp_path: Path) -> None:
+    repo = make_single_file_repo(tmp_path)
+
+    snapshot = GitTargetAdapter(repo.root).capture(())
+
+    assert snapshot.target.is_clean
+
+
+def test_valid_multi_record_git_nul_frames_are_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    use_git_wrapper(monkeypatch, wrapper)
+
+    snapshot = GitTargetAdapter(repo.root).capture(())
+    commands = {
+        command
+        for invocation in wrapper.invocations()
+        for command in ("ls-tree", "ls-files")
+        if command in invocation
+    }
+
+    assert snapshot.target.is_clean
+    assert commands == {"ls-tree", "ls-files"}
+
+
+@pytest.mark.parametrize(
+    "invalid_target",
+    [
+        "nul",
+        "lone-surrogate",
+        "surrogate-path-like",
+        "overlong-component",
+        "over-depth",
+        "over-byte-budget",
+    ],
+)
+def test_caller_invalid_target_matrix_is_request_error(
+    tmp_path: Path, invalid_target: str
+) -> None:
+    class SurrogatePath:
+        def __fspath__(self) -> str:
+            return "surrogate-\ud800-path"
+
+    if invalid_target == "nul":
+        target: object = "bad\x00path"
+    elif invalid_target == "lone-surrogate":
+        target = "surrogate-\ud800-path"
+    elif invalid_target == "surrogate-path-like":
+        target = SurrogatePath()
+    elif invalid_target == "overlong-component":
+        target = tmp_path / ("x" * 256)
+    elif invalid_target == "over-depth":
+        target = tmp_path.joinpath(*("d" for _ in range(129)))
+    else:
+        target = tmp_path / ("x" * (32 * 1024 + 1))
+
+    with pytest.raises(CaptureRequestError) as captured:
+        GitTargetAdapter(target)  # type: ignore[arg-type]
+    assert "surrogate-" not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    ("target_state", "expected_error"),
+    [
+        ("missing", "request"),
+        ("nondirectory", "request"),
+        ("symlink", "request"),
+        ("inaccessible", "unknown"),
+    ],
+)
+def test_target_filesystem_classification_matrix(
+    tmp_path: Path, target_state: str, expected_error: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    restore_mode: int | None = None
+    if target_state == "missing":
+        target = tmp_path / "missing-target"
+    elif target_state == "nondirectory":
+        target = tmp_path / "target-file"
+        target.write_text("not a directory\n", encoding="utf-8")
+    elif target_state == "symlink":
+        target = tmp_path / "target-link"
+        os.symlink(repo.root, target)
+    else:
+        target = repo.root
+        restore_mode = stat.S_IMODE(target.stat().st_mode)
+        target.chmod(0)
+    error_type = (
+        CaptureRequestError
+        if expected_error == "request"
+        else CaptureUnknownError
+    )
+    try:
+        with pytest.raises(error_type):
+            GitTargetAdapter(target)
+    finally:
+        if restore_mode is not None:
+            target.chmod(restore_mode)
+
+
+@pytest.mark.parametrize(
+    ("component_count", "expected"),
+    [(128, "clean"), (129, "request")],
+)
+def test_target_component_budget_boundary(
+    tmp_path: Path, component_count: int, expected: str
+) -> None:
+    physical_base = tmp_path.resolve()
+    nested_count = component_count - len(physical_base.parts) - 1
+    assert nested_count > 0
+    nested = physical_base.joinpath(
+        *(f"d{index:03d}" for index in range(nested_count))
+    )
+    nested.mkdir(parents=True)
+    repo = make_git_repo(nested)
+    assert len(repo.root.parts) == component_count
+
+    if expected == "clean":
+        assert GitTargetAdapter(repo.root).capture(()).target.is_clean
+    else:
+        with pytest.raises(CaptureRequestError):
+            GitTargetAdapter(repo.root)
+
+
+@pytest.mark.parametrize(
+    ("component_count", "expected"),
+    [(128, "clean"), (129, "unknown")],
+)
+def test_symbolic_ref_component_budget_boundary(
+    tmp_path: Path, component_count: int, expected: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    ref_path = "/".join(
+        ("refs", "heads", *(f"c{index:03d}" for index in range(component_count - 2)))
+    )
+    install_symbolic_ref_paths(repo, (ref_path,), head)
+
+    if expected == "clean":
+        assert GitTargetAdapter(repo.root).capture(()).target.is_clean
+    else:
+        with pytest.raises(CaptureUnknownError):
+            GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize(
+    ("chain_count", "expected"),
+    [(32, "clean"), (33, "unknown")],
+)
+def test_symbolic_ref_chain_count_boundary(
+    tmp_path: Path, chain_count: int, expected: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    paths = tuple(f"refs/heads/chain-{index:02d}" for index in range(chain_count))
+    install_symbolic_ref_paths(repo, paths, head)
+
+    if expected == "clean":
+        assert GitTargetAdapter(repo.root).capture(()).target.is_clean
+    else:
+        with pytest.raises(CaptureUnknownError):
+            GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize(
+    ("total_bytes", "expected"),
+    [(8192, "clean"), (8193, "unknown")],
+)
+def test_symbolic_ref_total_byte_budget_boundary(
+    tmp_path: Path, total_bytes: int, expected: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    paths = []
+    for index in range(32):
+        name_length = 245 + (1 if index == 0 and total_bytes == 8193 else 0)
+        prefix = f"r{index:02d}-"
+        paths.append("refs/heads/" + prefix + "x" * (name_length - len(prefix)))
+    assert sum(len(path.encode("ascii")) for path in paths) == total_bytes
+    install_symbolic_ref_paths(repo, tuple(paths), head)
+
+    if expected == "clean":
+        assert GitTargetAdapter(repo.root).capture(()).target.is_clean
+    else:
+        with pytest.raises(CaptureUnknownError):
+            GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize(
+    ("component_bytes", "expected"),
+    [(255, "clean"), (256, "unknown")],
+)
+def test_symbolic_ref_component_byte_boundary(
+    tmp_path: Path, component_bytes: int, expected: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    ref_path = "refs/heads/" + "r" * component_bytes
+    if expected == "clean":
+        install_symbolic_ref_paths(repo, (ref_path,), head)
+        assert GitTargetAdapter(repo.root).capture(()).target.is_clean
+    else:
+        (repo.git_dir / "HEAD").write_text(f"ref: {ref_path}\n", encoding="ascii")
+        with pytest.raises(CaptureUnknownError):
+            GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize("packed_identity", ["same", "different"])
+def test_loose_and_packed_terminal_ref_is_ambiguous_unknown(
+    tmp_path: Path, packed_identity: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    original = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    tree = repo.git("rev-parse", "HEAD^{tree}").strip().decode("ascii")
+    replacement = (
+        repo.git("commit-tree", tree, "-p", original, "-m", "same tree")
+        .strip()
+        .decode("ascii")
+    )
+    ref_path = "refs/heads/ambiguous"
+    install_symbolic_ref_paths(repo, (ref_path,), original)
+    packed_oid = original if packed_identity == "same" else replacement
+    (repo.git_dir / "packed-refs").write_text(
+        f"# pack-refs with: peeled fully-peeled sorted\n{packed_oid} {ref_path}\n",
+        encoding="ascii",
+    )
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize(
+    "ref_path",
+    [
+        "refs/heads/has space",
+        "refs/heads/double..dot",
+        "refs/heads/at@{brace",
+        "refs/heads/back\\slash",
+        "refs/heads/tilde~name",
+        "refs/heads/caret^name",
+        "refs/heads/colon:name",
+        "refs/heads/question?name",
+        "refs/heads/star*name",
+        "refs/heads/bracket[name",
+        "refs/heads/.leading-dot",
+        "refs/heads/trailing.lock",
+        "refs/heads/trailing.",
+        "refs//heads/empty",
+        "heads/not-under-refs",
+    ],
+)
+def test_symbolic_ref_strict_grammar_matrix_is_unknown(
+    tmp_path: Path, ref_path: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    (repo.git_dir / "HEAD").write_text(f"ref: {ref_path}\n", encoding="ascii")
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize("role", ["url", "pushurl"])
+@pytest.mark.parametrize(
+    "remote",
+    [
+        "https://example.invalid/repo path.git",
+        "https://example.invalid/repo%20path.git",
+        "https://example.invalid/repo%09path.git",
+        "https://example.invalid/repo%0Apath.git",
+        "https://example.invalid/repo%00path.git",
+        "http://example.invalid/repository.git",
+        "https://example.invalid:0/repository.git",
+        "https://example.invalid:65536/repository.git",
+        "https://user@example.invalid/repository.git",
+        (
+            "https://user:password@example.invalid/"  # pragma: allowlist secret
+            "repository.git"
+        ),
+        "https://example.invalid/repository.git?private=1",
+        "https://example.invalid/repository.git#private",
+        "file:///private/repository.git",
+        "ext::credential-helper",
+        "helper with secret",
+        "https://example.invalid/repo\\path.git",
+    ],
+)
+def test_remote_value_rejection_matrix_is_redacted_unknown(
+    tmp_path: Path, role: str, remote: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    repo.git("config", "--add", f"remote.origin.{role}", remote)
+
+    with pytest.raises(CaptureUnknownError) as captured:
+        GitTargetAdapter(repo.root).capture(())
+    assert remote not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    "remote_name",
+    ["", "bad name", "bad/name", ".leading", "trailing.", "bad@name", "x" * 129],
+)
+def test_invalid_remote_name_is_unknown(tmp_path: Path, remote_name: str) -> None:
+    repo = make_git_repo(tmp_path)
+    with (repo.git_dir / "config").open("a", encoding="utf-8") as stream:
+        stream.write(
+            f'\n[remote "{remote_name}"]\n\turl = https://example.invalid/repo.git\n'
+        )
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_remote_role_swap_changes_identity_digest(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    fetch = "https://example.invalid/fetch.git"
+    push = "ssh://git@example.invalid/push.git"
+    repo.git("config", "--add", "remote.origin.url", fetch)
+    repo.git("config", "--add", "remote.origin.pushurl", push)
+    before = GitTargetAdapter(repo.root).capture(())
+    repo.git("config", "--unset-all", "remote.origin.url")
+    repo.git("config", "--unset-all", "remote.origin.pushurl")
+    repo.git("config", "--add", "remote.origin.url", push)
+    repo.git("config", "--add", "remote.origin.pushurl", fetch)
+    after = GitTargetAdapter(repo.root).capture(())
+
+    assert (
+        before.target.sanitized_remote_identity_digest
+        != after.target.sanitized_remote_identity_digest
+    )
+
+
+def test_remote_name_swap_changes_identity_digest(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    first = "https://example.invalid/first.git"
+    second = "https://example.invalid/second.git"
+    repo.git("config", "--add", "remote.alpha.url", first)
+    repo.git("config", "--add", "remote.beta.url", second)
+    before = GitTargetAdapter(repo.root).capture(())
+    repo.git("config", "--unset-all", "remote.alpha.url")
+    repo.git("config", "--unset-all", "remote.beta.url")
+    repo.git("config", "--add", "remote.alpha.url", second)
+    repo.git("config", "--add", "remote.beta.url", first)
+    after = GitTargetAdapter(repo.root).capture(())
+
+    assert (
+        before.target.sanitized_remote_identity_digest
+        != after.target.sanitized_remote_identity_digest
+    )
+
+
+def test_case_distinct_remote_name_swap_changes_identity_digest(
+    tmp_path: Path,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    first = "https://example.invalid/first.git"
+    second = "https://example.invalid/second.git"
+    repo.git("config", "--add", "remote.Alpha.url", first)
+    repo.git("config", "--add", "remote.alpha.url", second)
+    assert (
+        repo.git("config", "--get-all", "remote.Alpha.url").strip()
+        == first.encode()
+    )
+    assert (
+        repo.git("config", "--get-all", "remote.alpha.url").strip()
+        == second.encode()
+    )
+    before = GitTargetAdapter(repo.root).capture(())
+    repo.git("config", "--unset-all", "remote.Alpha.url")
+    repo.git("config", "--unset-all", "remote.alpha.url")
+    repo.git("config", "--add", "remote.Alpha.url", second)
+    repo.git("config", "--add", "remote.alpha.url", first)
+    after = GitTargetAdapter(repo.root).capture(())
+
+    assert (
+        before.target.sanitized_remote_identity_digest
+        != after.target.sanitized_remote_identity_digest
+    )
+
+
+def test_remote_duplicate_values_are_retained_deterministically(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    first = "https://example.invalid/first.git"
+    second = "https://example.invalid/second.git"
+    for value in (first, first, second):
+        repo.git("config", "--add", "remote.origin.url", value)
+    before = GitTargetAdapter(repo.root).capture(())
+    repo.git("config", "--unset-all", "remote.origin.url")
+    for value in (second, first, first):
+        repo.git("config", "--add", "remote.origin.url", value)
+    after = GitTargetAdapter(repo.root).capture(())
+
+    assert (
+        before.target.sanitized_remote_identity_digest
+        == after.target.sanitized_remote_identity_digest
+    )
+
+
+def test_remote_duplicate_addition_changes_identity_digest(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    remote = "https://example.invalid/repository.git"
+    repo.git("config", "--add", "remote.origin.url", remote)
+    before = GitTargetAdapter(repo.root).capture(())
+    repo.git("config", "--add", "remote.origin.url", remote)
+    after = GitTargetAdapter(repo.root).capture(())
+
+    assert (
+        before.target.sanitized_remote_identity_digest
+        != after.target.sanitized_remote_identity_digest
+    )
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        "https://EXAMPLE.invalid/repository.git",
+        "git://example.invalid/repository.git",
+        "ssh://git@example.invalid:1/repository.git",
+        "ssh://git@example.invalid:65535/repository.git",
+        "git@example.invalid:repository.git",
+    ],
+)
+def test_safe_remote_normalization_controls_are_clean(
+    tmp_path: Path, remote: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    repo.git("config", "--add", "remote.origin.url", remote)
+
+    assert GitTargetAdapter(repo.root).capture(()).target.is_clean

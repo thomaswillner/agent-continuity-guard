@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import ipaddress
 import os
 import platform
 import re
@@ -19,7 +20,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Final
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote_to_bytes, urlsplit, urlunsplit
 
 from agent_continuity.kernel.canonical import (
     CanonicalJSONError,
@@ -49,12 +50,21 @@ _MAX_TRAVERSAL_ENTRIES: Final = 1_000_000
 _MAX_TOTAL_PATH_BYTES: Final = 256 * 1024 * 1024
 _MAX_CAPTURE_SECONDS: Final = 30.0
 _MAX_METADATA_BYTES: Final = 8 * 1024 * 1024
+_MAX_TARGET_PATH_BYTES: Final = 32 * 1024
+_MAX_PATH_COMPONENT_BYTES: Final = 255
 _MAX_SYMBOLIC_REF_DEPTH: Final = 32
+_MAX_SYMBOLIC_REF_TOTAL_BYTES: Final = 8 * 1024
 _ALLOWED_INDEX_EXTENSIONS: Final = frozenset({b"TREE"})
 _OID_RE = re.compile(rb"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _SCP_REMOTE_RE = re.compile(
     r"^git@(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(?P<path>[^\s?#]+)$"
 )
+_REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_REMOTE_HOST_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$"
+)
+_PERCENT_ESCAPE_RE = re.compile(r"%([0-9A-Fa-f]{2})")
 _FILTER_KEY_RE = re.compile(r"^filter\..+\.")
 _DESCRIPTOR_GIT_BOOTSTRAP: Final = (
     "import os,sys;"
@@ -104,6 +114,12 @@ class _WorktreeProof:
     manifest: bytes
     traversal_manifest: bytes
     contents: dict[bytes, bytes]
+
+
+@dataclass(frozen=True, slots=True)
+class _HeadProof:
+    sources: tuple[_ObservedFile, ...]
+    terminal_oid: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +379,54 @@ def _expected_oid_length(object_format: str) -> int:
     raise CaptureUnknownError("Git object format is unsupported")
 
 
+def _parse_nul_frame(data: bytes) -> tuple[bytes, ...]:
+    if not data:
+        return ()
+    if not data.endswith(b"\x00"):
+        raise CaptureUnknownError("Git NUL-delimited output was truncated")
+    records = tuple(data[:-1].split(b"\x00"))
+    if any(not record for record in records):
+        raise CaptureUnknownError("Git NUL-delimited output was malformed")
+    return records
+
+
+def _validate_target_path(target: str | os.PathLike[str]) -> Path:
+    try:
+        raw_target = os.fspath(target)
+    except TypeError as error:
+        raise CaptureRequestError("target path is invalid") from error
+    if (
+        not isinstance(raw_target, str)
+        or not raw_target
+        or "\x00" in raw_target
+        or any(0xD800 <= ord(character) <= 0xDFFF for character in raw_target)
+    ):
+        raise CaptureRequestError("target path is invalid")
+    try:
+        raw_bytes = os.fsencode(raw_target)
+    except UnicodeEncodeError as error:
+        raise CaptureRequestError("target path is invalid") from error
+    if len(raw_bytes) > _MAX_TARGET_PATH_BYTES:
+        raise CaptureRequestError("target path exceeded byte limit")
+    try:
+        absolute = os.path.abspath(raw_target)
+    except OSError as error:
+        raise CaptureUnknownError("target path could not be resolved") from error
+    try:
+        absolute_bytes = os.fsencode(absolute)
+    except UnicodeEncodeError as error:
+        raise CaptureRequestError("target path is invalid") from error
+    if len(absolute_bytes) > _MAX_TARGET_PATH_BYTES:
+        raise CaptureRequestError("target path exceeded byte limit")
+    requested = Path(absolute)
+    encoded_parts = tuple(os.fsencode(part) for part in requested.parts)
+    if len(encoded_parts) > _MAX_TRAVERSAL_DEPTH:
+        raise CaptureRequestError("target path exceeded component limit")
+    if any(len(part) > _MAX_PATH_COMPONENT_BYTES for part in encoded_parts):
+        raise CaptureRequestError("target path component exceeded byte limit")
+    return requested
+
+
 def _validate_repo_path(raw_path: bytes) -> None:
     components = raw_path.split(b"/")
     if (
@@ -390,6 +454,8 @@ def _validate_symbolic_ref_path(raw_path: bytes) -> None:
         )
         or b".." in raw_path
         or b"@{" in raw_path
+        or len(components) > _MAX_TRAVERSAL_DEPTH
+        or any(len(component) > _MAX_PATH_COMPONENT_BYTES for component in components)
         or any(
             byte < 0x20 or byte == 0x7F or byte in forbidden for byte in raw_path
         )
@@ -408,10 +474,10 @@ def _metadata_line(observation: _ObservedFile) -> bytes:
     return content
 
 
-def _packed_refs_contains(data: bytes, target: bytes) -> bool:
+def _packed_ref_oid(data: bytes, target: bytes) -> bytes | None:
     if data and (not data.endswith(b"\n") or b"\r" in data or b"\x00" in data):
         raise CaptureUnknownError("packed reference metadata was malformed")
-    found = False
+    found: bytes | None = None
     previous_entry = False
     seen: set[bytes] = set()
     for line in data.split(b"\n"):
@@ -437,7 +503,7 @@ def _packed_refs_contains(data: bytes, target: bytes) -> bool:
         seen.add(ref_path)
         previous_entry = True
         if ref_path == target:
-            found = True
+            found = oid
     return found
 
 
@@ -507,17 +573,7 @@ class GitTargetAdapter:
         return executable
 
     def _pin_requested_root(self, target: str | os.PathLike[str]) -> None:
-        try:
-            raw_target = os.fspath(target)
-        except TypeError as error:
-            raise CaptureRequestError("target path is invalid") from error
-        if (
-            not isinstance(raw_target, str)
-            or not raw_target
-            or "\x00" in raw_target
-        ):
-            raise CaptureRequestError("target path is invalid")
-        requested = Path(os.path.abspath(raw_target))
+        requested = _validate_target_path(target)
         try:
             self._root_fd = _open_absolute_directory(requested)
         except CaptureUnknownError as error:
@@ -943,12 +999,18 @@ class GitTargetAdapter:
             )
         return canonical_bytes(values)
 
-    def _config_sources(self) -> tuple[_ObservedFile, ...]:
+    def _common_local_metadata_sources(
+        self,
+        raw_path: bytes,
+        *,
+        common_required: bool,
+        additional_git_paths: tuple[bytes, ...] = (),
+    ) -> tuple[_ObservedFile, ...]:
         values = [
             self._observe_file(
                 self._common_git_fd,
-                b"config",
-                required=True,
+                raw_path,
+                required=common_required,
                 max_bytes=_MAX_METADATA_BYTES,
             )
         ]
@@ -956,62 +1018,37 @@ class GitTargetAdapter:
             values.append(
                 self._observe_file(
                     self._git_fd,
-                    b"config",
+                    raw_path,
                     required=False,
                     max_bytes=_MAX_METADATA_BYTES,
                 )
             )
-        values.append(
+        values.extend(
             self._observe_file(
-                self._git_fd,
-                b"config.worktree",
-                required=False,
-                max_bytes=_MAX_METADATA_BYTES,
+                self._git_fd, path, required=False, max_bytes=_MAX_METADATA_BYTES
             )
+            for path in additional_git_paths
         )
         return tuple(values)
 
+    def _config_sources(self) -> tuple[_ObservedFile, ...]:
+        return self._common_local_metadata_sources(
+            b"config",
+            common_required=True,
+            additional_git_paths=(b"config.worktree",),
+        )
+
     def _attribute_sources(self) -> tuple[_ObservedFile, ...]:
-        values = [
-            self._observe_file(
-                self._common_git_fd,
-                b"info/attributes",
-                required=False,
-                max_bytes=_MAX_METADATA_BYTES,
-            )
-        ]
-        if self.git_directory != self.git_common_directory:
-            values.append(
-                self._observe_file(
-                    self._git_fd,
-                    b"info/attributes",
-                    required=False,
-                    max_bytes=_MAX_METADATA_BYTES,
-                )
-            )
-        return tuple(values)
+        return self._common_local_metadata_sources(
+            b"info/attributes", common_required=False
+        )
 
     def _ignore_sources(self) -> tuple[_ObservedFile, ...]:
-        values = [
-            self._observe_file(
-                self._common_git_fd,
-                b"info/exclude",
-                required=False,
-                max_bytes=_MAX_METADATA_BYTES,
-            )
-        ]
-        if self.git_directory != self.git_common_directory:
-            values.append(
-                self._observe_file(
-                    self._git_fd,
-                    b"info/exclude",
-                    required=False,
-                    max_bytes=_MAX_METADATA_BYTES,
-                )
-            )
-        return tuple(values)
+        return self._common_local_metadata_sources(
+            b"info/exclude", common_required=False
+        )
 
-    def _head_sources(self) -> tuple[_ObservedFile, ...]:
+    def _head_sources(self) -> _HeadProof:
         head = self._observe_file(
             self._git_fd,
             b"HEAD",
@@ -1023,7 +1060,7 @@ class GitTargetAdapter:
         if not content.startswith(b"ref: "):
             if _OID_RE.fullmatch(content) is None:
                 raise CaptureUnknownError("HEAD metadata is malformed")
-            return tuple(values)
+            return _HeadProof(sources=tuple(values), terminal_oid=content)
 
         packed = self._observe_file(
             self._common_git_fd,
@@ -1033,11 +1070,18 @@ class GitTargetAdapter:
         )
         visited: set[bytes] = set()
         depth = 0
+        total_ref_bytes = 0
+        values.append(packed)
         while content.startswith(b"ref: "):
             if depth >= _MAX_SYMBOLIC_REF_DEPTH:
                 raise CaptureUnknownError("symbolic reference depth exceeded limit")
             ref_path = content[len(b"ref: ") :]
             _validate_symbolic_ref_path(ref_path)
+            total_ref_bytes += len(ref_path)
+            if total_ref_bytes > _MAX_SYMBOLIC_REF_TOTAL_BYTES:
+                raise CaptureUnknownError(
+                    "symbolic reference byte budget exceeded limit"
+                )
             if ref_path in visited:
                 raise CaptureUnknownError("symbolic reference cycle is unsupported")
             visited.add(ref_path)
@@ -1049,20 +1093,21 @@ class GitTargetAdapter:
                 max_bytes=_MAX_METADATA_BYTES,
             )
             values.append(loose)
+            packed_oid = _packed_ref_oid(packed.content or b"", ref_path)
+            if loose.exists and packed_oid is not None:
+                raise CaptureUnknownError(
+                    "loose and packed reference sources are ambiguous"
+                )
             if loose.exists:
                 content = _metadata_line(loose)
                 continue
-            if not packed.exists or not _packed_refs_contains(
-                packed.content or b"", ref_path
-            ):
+            if packed_oid is None:
                 raise CaptureUnknownError("HEAD reference source is unavailable")
-            values.append(packed)
-            return tuple(values)
+            content = packed_oid
 
         if _OID_RE.fullmatch(content) is None:
             raise CaptureUnknownError("HEAD reference metadata is malformed")
-        values.append(packed)
-        return tuple(values)
+        return _HeadProof(sources=tuple(values), terminal_oid=content)
 
     def _alternates_source(self) -> _ObservedFile:
         return self._observe_file(
@@ -1074,15 +1119,11 @@ class GitTargetAdapter:
 
     @staticmethod
     def _parse_config(data: bytes) -> tuple[tuple[str, str], ...]:
-        if data and not data.endswith(b"\x00"):
-            raise CaptureUnknownError("Git config output was malformed")
         entries: list[tuple[str, str]] = []
-        for row in data.split(b"\x00"):
-            if not row:
-                continue
+        for row in _parse_nul_frame(data):
             try:
                 raw_key, raw_value = row.split(b"\n", 1)
-                key = raw_key.decode("ascii", errors="strict").lower()
+                key = raw_key.decode("ascii", errors="strict")
                 value = raw_value.decode("utf-8", errors="strict")
             except (UnicodeError, ValueError) as error:
                 raise CaptureUnknownError("Git config output was malformed") from error
@@ -1095,7 +1136,9 @@ class GitTargetAdapter:
     def _config_values(
         entries: tuple[tuple[str, str], ...], key: str
     ) -> tuple[str, ...]:
-        return tuple(value for candidate, value in entries if candidate == key)
+        return tuple(
+            value for candidate, value in entries if candidate.lower() == key
+        )
 
     @staticmethod
     def _is_false(value: str) -> bool:
@@ -1108,12 +1151,13 @@ class GitTargetAdapter:
     @classmethod
     def _assert_config_eligible(cls, entries: tuple[tuple[str, str], ...]) -> None:
         for key, _value in entries:
+            normalized_key = key.lower()
             if (
-                key.startswith("include.")
-                or key.startswith("includeif.")
-                or _FILTER_KEY_RE.match(key) is not None
-                or key == "core.attributesfile"
-                or key == "core.worktree"
+                normalized_key.startswith("include.")
+                or normalized_key.startswith("includeif.")
+                or _FILTER_KEY_RE.match(normalized_key) is not None
+                or normalized_key == "core.attributesfile"
+                or normalized_key == "core.worktree"
             ):
                 raise CaptureUnknownError("Git conversion source is unsupported")
         autocrlf = cls._config_values(entries, "core.autocrlf")
@@ -1163,14 +1207,10 @@ class GitTargetAdapter:
     def _parse_tree(
         data: bytes, object_format: str | None = None
     ) -> tuple[_TreeEntry, ...]:
-        if data and not data.endswith(b"\x00"):
-            raise CaptureUnknownError("Git tree output was malformed")
         entries: list[_TreeEntry] = []
         previous: bytes | None = None
         total_path_bytes = 0
-        for row in data.split(b"\x00"):
-            if not row:
-                continue
+        for row in _parse_nul_frame(data):
             try:
                 header, raw_path = row.split(b"\t", 1)
                 mode, object_type, oid = header.split(b" ", 2)
@@ -1212,14 +1252,10 @@ class GitTargetAdapter:
     def _parse_index(
         data: bytes, object_format: str | None = None
     ) -> tuple[_IndexEntry, ...]:
-        if data and not data.endswith(b"\x00"):
-            raise CaptureUnknownError("Git index output was malformed")
         entries: list[_IndexEntry] = []
         previous: bytes | None = None
         total_path_bytes = 0
-        for row in data.split(b"\x00"):
-            if not row:
-                continue
+        for row in _parse_nul_frame(data):
             try:
                 header, raw_path = row.split(b"\t", 1)
                 mode, oid, stage_bytes = header.split(b" ", 2)
@@ -1659,18 +1695,24 @@ class GitTargetAdapter:
 
     @staticmethod
     def _remote_identity_digest(config: tuple[tuple[str, str], ...]) -> Digest | None:
-        identities: list[str] = []
+        identities: list[tuple[str, str, str]] = []
         for key, value in config:
-            if key.startswith("remote.") and key.endswith((".url", ".pushurl")):
-                try:
-                    identities.append(_sanitize_remote(value))
-                except CaptureRequestError as error:
-                    raise CaptureUnknownError(
-                        "remote identity metadata is unsupported"
-                    ) from error
+            remote_key = _remote_key(key)
+            if remote_key is None:
+                continue
+            name, role = remote_key
+            try:
+                normalized = _sanitize_remote(value)
+            except CaptureRequestError as error:
+                raise CaptureUnknownError(
+                    "remote identity metadata is unsupported"
+                ) from error
+            identities.append((name, role, normalized))
         if not identities:
             return None
-        canonical_identities: list[JsonValue] = [item for item in sorted(identities)]
+        canonical_identities: list[JsonValue] = [
+            [name, role, value] for name, role, value in sorted(identities)
+        ]
         return digest_bytes(canonical_bytes(canonical_identities))
 
     @staticmethod
@@ -1737,8 +1779,10 @@ class GitTargetAdapter:
         )
 
         object_format = self._object_format()
+        resolved_head = head_before.terminal_oid.decode("ascii")
         head_oid = self._single_oid(
-            ("rev-parse", "--verify", "HEAD^{commit}"), object_format
+            ("rev-parse", "--verify", f"{resolved_head}^{{commit}}"),
+            object_format,
         )
         tree_oid = self._single_oid(
             ("rev-parse", "--verify", f"{head_oid}^{{tree}}"), object_format
@@ -1804,7 +1848,7 @@ class GitTargetAdapter:
             config_after,
             attributes_after,
             ignores_after,
-            head_after,
+            head_after.sources,
             index_after,
             alternates_after,
         )
@@ -1908,35 +1952,98 @@ class GitTargetAdapter:
         return tuple(sorted(values, key=lambda item: item.name))
 
 
-def _sanitize_remote(value: str) -> str:
-    if type(value) is not str or any(ord(character) < 0x20 for character in value):
-        raise CaptureRequestError("remote identity contains invalid characters")
-    if "://" in value:
+def _remote_key(key: str) -> tuple[str, str] | None:
+    normalized_key = key.lower()
+    if not normalized_key.startswith("remote."):
+        return None
+    if normalized_key.endswith(".pushurl"):
+        name = key[len("remote.") : -len(".pushurl")]
+        role = "push"
+    elif normalized_key.endswith(".url"):
+        name = key[len("remote.") : -len(".url")]
+        role = "fetch"
+    else:
+        return None
+    if (
+        len(name.encode("ascii")) > 128
+        or _REMOTE_NAME_RE.fullmatch(name) is None
+        or name.endswith(".")
+        or ".." in name
+    ):
+        raise CaptureUnknownError("remote name metadata is unsupported")
+    return name, role
+
+
+def _normalized_remote_host(host: str) -> str:
+    if ":" in host:
         try:
-            parsed = urlsplit(value)
+            return f"[{ipaddress.IPv6Address(host).compressed}]"
+        except ipaddress.AddressValueError as error:
+            raise CaptureRequestError("remote host is invalid") from error
+    if _REMOTE_HOST_RE.fullmatch(host) is None:
+        raise CaptureRequestError("remote host is invalid")
+    return host.lower()
+
+
+def _normalized_percent_escapes(value: str) -> str:
+    if "%" in _PERCENT_ESCAPE_RE.sub("", value):
+        raise CaptureRequestError("remote percent escape is invalid")
+    decoded = unquote_to_bytes(value)
+    if any(byte <= 0x20 or byte in {0x5C, 0x7F} for byte in decoded):
+        raise CaptureRequestError("remote identity contains invalid characters")
+    return _PERCENT_ESCAPE_RE.sub(
+        lambda match: f"%{match.group(1).upper()}", value
+    )
+
+
+def _sanitize_remote(value: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or any(
+            ord(character) <= 0x20
+            or ord(character) >= 0x7F
+            or character == "\\"
+            for character in value
+        )
+    ):
+        raise CaptureRequestError("remote identity contains invalid characters")
+    normalized = _normalized_percent_escapes(value)
+    if "://" in normalized:
+        try:
+            parsed = urlsplit(normalized)
             port = parsed.port
         except ValueError as error:
             raise CaptureRequestError("remote URL port is invalid") from error
-        if parsed.scheme not in {"git", "https", "ssh"}:
+        scheme = parsed.scheme.lower()
+        if scheme not in {"git", "https", "ssh"}:
             raise CaptureRequestError("remote URL scheme is unsupported")
         if parsed.query or parsed.fragment or parsed.password is not None:
             raise CaptureRequestError("remote credentials or URL suffix are forbidden")
         if parsed.username is not None and not (
-            parsed.scheme == "ssh" and parsed.username == "git"
+            scheme == "ssh" and parsed.username == "git"
         ):
             raise CaptureRequestError("remote credentials are forbidden")
-        if not parsed.hostname or not parsed.path or "@" in parsed.hostname:
+        if (
+            not parsed.hostname
+            or not parsed.path
+            or not parsed.path.startswith("/")
+            or "@" in parsed.hostname
+        ):
             raise CaptureRequestError("remote URL is malformed")
-        host = parsed.hostname.lower()
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
+        host = _normalized_remote_host(parsed.hostname)
         if port is not None:
+            if not 1 <= port <= 65535:
+                raise CaptureRequestError("remote URL port is invalid")
             host = f"{host}:{port}"
-        return urlunsplit((parsed.scheme.lower(), host, parsed.path, "", ""))
-    if value.count("@") != 1:
+        return urlunsplit((scheme, host, parsed.path, "", ""))
+    if normalized.count("@") != 1:
         raise CaptureRequestError("remote SCP identity is malformed")
-    match = _SCP_REMOTE_RE.fullmatch(value)
+    match = _SCP_REMOTE_RE.fullmatch(normalized)
     if match is None:
         raise CaptureRequestError("remote identity grammar is unsupported")
-    host = match.group("host").lower()
+    raw_host = match.group("host")
+    if raw_host.startswith("[") and raw_host.endswith("]"):
+        raw_host = raw_host[1:-1]
+    host = _normalized_remote_host(raw_host)
     return f"ssh://{host}/{match.group('path')}"
