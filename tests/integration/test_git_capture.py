@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import stat
+import struct
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 import agent_continuity.capture.git as git_capture
-from agent_continuity.capture.base import CaptureRequestError, CaptureUnknownError
-from agent_continuity.capture.coordinator import snapshot_findings
+from agent_continuity.capture.base import (
+    CaptureRequestError,
+    CaptureUnknownError,
+    target_identity_payload,
+)
 from agent_continuity.capture.git import GitTargetAdapter
-from agent_continuity.kernel.evaluation import Profile, Verdict, evaluate
+from agent_continuity.kernel.canonical import canonical_bytes, digest_bytes
 from tests.helpers.git_repo import (
     GitRepo,
     make_git_repo,
@@ -50,21 +56,14 @@ def test_clean_git_capture_is_deterministic_and_read_only(tmp_path: Path) -> Non
     assert repository_write_manifest(repo.root) == before_files
 
 
-def test_dirty_target_produces_unknown_finding_without_false_clean_result(
+def test_dirty_target_is_unknown_without_returning_a_false_clean_snapshot(
     tmp_path: Path,
 ) -> None:
     repo = make_git_repo(tmp_path)
     (repo.root / "README.md").write_text("changed\n", encoding="utf-8")
-    snapshot = GitTargetAdapter(repo.root).capture((b"AGENTS.md",))
 
-    result = evaluate(
-        snapshot_findings(snapshot, snapshot, Profile.GUARD)
-    )
-
-    assert snapshot.target.is_clean is False
-    assert result.verdict is Verdict.UNKNOWN
-    assert result.transition_allowed is False
-    assert [item.code for item in result.findings] == ["target.dirty"]
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture((b"AGENTS.md",))
 
 
 def test_missing_or_unsafe_instruction_path_is_a_request_error(tmp_path: Path) -> None:
@@ -107,7 +106,7 @@ def test_symlink_target_mode_and_ignore_provenance_are_identity_bound(
 @pytest.mark.parametrize(
     "remote",
     [
-        "https://user:secret@example.invalid/acg.git",
+        "https://user:secret@example.invalid/acg.git",  # pragma: allowlist secret
         "https://example.invalid/acg.git?token=secret",
         "https://example.invalid/acg.git#fragment",
     ],
@@ -117,8 +116,9 @@ def test_remote_credentials_query_and_fragment_are_rejected(
 ) -> None:
     repo = make_git_repo(tmp_path, remote=remote)
 
-    with pytest.raises(CaptureRequestError):
+    with pytest.raises(CaptureUnknownError) as captured:
         GitTargetAdapter(repo.root).capture(())
+    assert remote not in str(captured.value)
 
 
 def test_capability_unknown_is_not_treated_as_proven(tmp_path: Path) -> None:
@@ -134,7 +134,7 @@ def test_capability_unknown_is_not_treated_as_proven(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("mutation", ["worktree", "index", "head"])
-def test_capture_rejects_mutation_after_initial_clean_status(
+def test_capture_rejects_mutation_after_initial_tree_observation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     mutation: str,
@@ -156,7 +156,7 @@ def test_capture_rejects_mutation_after_initial_clean_status(
             allowed_codes=allowed_codes,
             input_data=input_data,
         )
-        if args and args[0] == "status" and not mutated:
+        if args and args[0] == "ls-tree" and not mutated:
             mutated = True
             if mutation == "worktree":
                 (repo.root / "README.md").write_text("mutated\n", encoding="utf-8")
@@ -206,86 +206,66 @@ def test_tree_listing_is_pinned_to_sampled_tree_oid(
     )
 
 
-def test_commit_boundary_rechecks_index_after_second_status(
+def test_capture_rechecks_index_after_first_direct_index_observation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
     adapter = GitTargetAdapter(repo.root)
     original_run = adapter._run
-    status_count = 0
+    index_count = 0
 
-    def mutate_after_second_status(
+    def mutate_after_first_index_observation(
         args: tuple[str, ...],
         *,
         allowed_codes: tuple[int, ...] = (0,),
         input_data: bytes | None = None,
     ) -> bytes:
-        nonlocal status_count
+        nonlocal index_count
         output = original_run(
             args,
             allowed_codes=allowed_codes,
             input_data=input_data,
         )
-        if args and args[0] == "status":
-            status_count += 1
-            if status_count == 2:
+        if args and args[0] == "ls-files":
+            index_count += 1
+            if index_count == 1:
                 (repo.root / "late.txt").write_text("late\n", encoding="utf-8")
                 repo.git("add", "late.txt")
         return output
 
-    monkeypatch.setattr(adapter, "_run", mutate_after_second_status)
+    monkeypatch.setattr(adapter, "_run", mutate_after_first_index_observation)
 
     with pytest.raises(CaptureUnknownError):
         adapter.capture(())
 
 
-def test_capture_rejects_aba_content_schedule_using_permission_identity(
+def test_capture_rejects_ordinary_leaf_rename_swap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
     tracked = repo.root / "README.md"
-    content_a = tracked.read_bytes()
-    content_b = b"B" * len(content_a)
-    mode_a = stat.S_IMODE(tracked.stat().st_mode)
+    replacement = tmp_path / "replacement-readme"
+    replacement.write_bytes(tracked.read_bytes())
+    replacement.chmod(stat.S_IMODE(tracked.stat().st_mode))
+    displaced = tmp_path / "displaced-readme"
     adapter = GitTargetAdapter(repo.root)
-    original_run = adapter._run
-    status_count = 0
+    real_listdir = os.listdir
+    swapped = False
 
-    def run_with_aba_schedule(
-        args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
-    ) -> bytes:
-        nonlocal status_count
-        is_status = bool(args and args[0] == "status")
-        if is_status:
-            status_count += 1
-            if status_count in {2, 3}:
-                tracked.chmod(mode_a)
-                tracked.write_bytes(content_a)
-        output = original_run(
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
-        if is_status and status_count == 1:
-            tracked.write_bytes(content_b)
-            tracked.chmod(0o600)
-        elif is_status and status_count == 2:
-            tracked.write_bytes(content_b)
-            tracked.chmod(0o400)
-        return output
+    def swap_after_root_listing(path: int | str | bytes) -> list[str]:
+        nonlocal swapped
+        result = real_listdir(path)
+        if not swapped and "README.md" in result:
+            tracked.rename(displaced)
+            replacement.rename(tracked)
+            swapped = True
+        return result
 
-    monkeypatch.setattr(adapter, "_run", run_with_aba_schedule)
+    monkeypatch.setattr(os, "listdir", swap_after_root_listing)
 
     with pytest.raises(CaptureUnknownError):
         adapter.capture(())
-
-    assert status_count == 3
-    assert tracked.read_bytes() == content_a
-    assert stat.S_IMODE(tracked.stat().st_mode) == mode_a
-    assert repo.git("status", "--porcelain=v2", "-z") == b""
+    assert swapped
 
 
 def test_hostile_local_fsmonitor_is_not_executed_and_network_is_unproven(
@@ -362,7 +342,7 @@ def test_intermediate_symlink_replacement_fails_closed(
             allowed_codes=allowed_codes,
             input_data=input_data,
         )
-        if args and args[0] == "status" and not mutated:
+        if args and args[0] == "ls-tree" and not mutated:
             mutated = True
             shutil.move(repo.root / "docs", tmp_path / "original-docs")
             os.symlink(outside, repo.root / "docs")
@@ -393,7 +373,7 @@ def test_root_replacement_is_unknown_not_a_request_error(
             allowed_codes=allowed_codes,
             input_data=input_data,
         )
-        if args and args[0] == "status" and not replaced:
+        if args and args[0] == "ls-tree" and not replaced:
             replaced = True
             repo.root.rename(tmp_path / "original-root")
             repo.root.mkdir()
@@ -545,7 +525,9 @@ def test_descriptor_bootstrap_closes_root_fd_before_git_exec(tmp_path: Path) -> 
     fake_git.chmod(0o700)
     try:
         result = git_capture._run_bounded(
-            GitTargetAdapter._descriptor_git_argv(descriptor, ("rev-parse", "HEAD")),
+            GitTargetAdapter._descriptor_git_argv(
+                descriptor, ("rev-parse", "HEAD"), fake_git
+            ),
             env={
                 "EXPECTED_FD": str(descriptor),
                 "LC_ALL": "C",
@@ -632,6 +614,491 @@ def test_linked_worktree_binds_common_exclude_provenance(tmp_path: Path) -> None
 
     assert adapter.git_common_directory == primary.git_dir.resolve()
     assert (
-        after.target.ignore_provenance_digest
-        != before.target.ignore_provenance_digest
+        after.target.ignore_provenance_digest != before.target.ignore_provenance_digest
     )
+
+
+def test_requested_root_is_pinned_before_first_git_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = make_git_repo(tmp_path)
+    original_head = original.git("rev-parse", "HEAD^{commit}").strip().decode()
+    replacement_base = tmp_path / "replacement"
+    replacement_base.mkdir()
+    replacement = make_git_repo(replacement_base)
+    (replacement.root / "README.md").write_text(
+        "replacement target\n", encoding="utf-8"
+    )
+    replacement.git("add", "README.md")
+    replacement.git("commit", "-q", "-m", "replacement identity")
+    replacement_head = replacement.git("rev-parse", "HEAD^{commit}").strip().decode()
+    assert replacement_head != original_head
+
+    displaced = tmp_path / "displaced-original"
+    real_run_bounded = git_capture._run_bounded
+    swapped = False
+
+    def swap_before_first_git(*args: object, **kwargs: object) -> object:
+        nonlocal swapped
+        if not swapped:
+            original.root.rename(displaced)
+            replacement.root.rename(original.root)
+            swapped = True
+        return real_run_bounded(*args, **kwargs)
+
+    monkeypatch.setattr(git_capture, "_run_bounded", swap_before_first_git)
+    adapter: GitTargetAdapter | None = None
+    try:
+        try:
+            adapter = GitTargetAdapter(original.root)
+            observed = adapter.capture(())
+        except CaptureUnknownError:
+            return
+        assert observed.target.head_oid == original_head
+        assert observed.target.head_oid != replacement_head
+    finally:
+        if adapter is not None:
+            adapter.close()
+        if swapped:
+            original.root.rename(replacement.root)
+            displaced.rename(original.root)
+
+
+def test_capture_git_processes_use_absolute_git_and_no_forbidden_porcelain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    real_run_bounded = git_capture._run_bounded
+    observed_argv: list[tuple[str, ...]] = []
+
+    def record_argv(argv: object, *args: object, **kwargs: object) -> object:
+        assert isinstance(argv, (list, tuple))
+        observed_argv.append(tuple(str(item) for item in argv))
+        return real_run_bounded(argv, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(git_capture, "_run_bounded", record_argv)
+    GitTargetAdapter(repo.root).capture(())
+
+    forbidden = {
+        "status",
+        "diff",
+        "check-attr",
+        "hash-object",
+        "checkout",
+        "submodule",
+    }
+    assert observed_argv
+    assert all(not forbidden.intersection(argv) for argv in observed_argv)
+    assert all(
+        any(Path(item).is_absolute() and Path(item).name == "git" for item in argv)
+        for argv in observed_argv
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "staged-add",
+        "staged-delete",
+        "staged-content",
+        "staged-mode",
+        "unstaged-content",
+        "unstaged-mode",
+        "symlink-target",
+        "untracked",
+        "ignored-only",
+        "empty-directory",
+    ],
+)
+def test_every_non_head_index_worktree_path_state_is_unknown(
+    tmp_path: Path, mutation: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    if mutation == "staged-add":
+        (repo.root / "new.txt").write_text("new\n", encoding="utf-8")
+        repo.git("add", "new.txt")
+    elif mutation == "staged-delete":
+        repo.git("rm", "-q", "README.md")
+    elif mutation == "staged-content":
+        (repo.root / "README.md").write_text("staged\n", encoding="utf-8")
+        repo.git("add", "README.md")
+    elif mutation == "staged-mode":
+        (repo.root / "README.md").chmod(0o755)
+        repo.git("add", "README.md")
+    elif mutation == "unstaged-content":
+        (repo.root / "README.md").write_text("unstaged\n", encoding="utf-8")
+    elif mutation == "unstaged-mode":
+        (repo.root / "README.md").chmod(0o755)
+    elif mutation == "symlink-target":
+        (repo.root / "latest").unlink()
+        os.symlink("AGENTS.md", repo.root / "latest")
+    elif mutation == "untracked":
+        (repo.root / "untracked.txt").write_text("untracked\n", encoding="utf-8")
+    elif mutation == "ignored-only":
+        (repo.root / "ignored.tmp").write_text("ignored\n", encoding="utf-8")
+    else:
+        (repo.root / "empty").mkdir()
+
+    before = repository_write_manifest(repo.root)
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+    assert repository_write_manifest(repo.root) == before
+
+
+@pytest.mark.parametrize("driver", ["clean", "process"])
+@pytest.mark.parametrize("trigger_command", ["rev-parse", "ls-files", "ls-tree"])
+def test_filter_injected_after_eligibility_check_never_executes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    driver: str,
+    trigger_command: str,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    adapter = GitTargetAdapter(repo.root)
+    sentinel = tmp_path / f"late-{driver}-executed"
+    program = tmp_path / f"late-{driver}.sh"
+    if driver == "clean":
+        body = f"#!/bin/sh\nprintf executed > '{sentinel}'\ncat\n"
+    else:
+        body = f"#!/bin/sh\nprintf executed > '{sentinel}'\nexit 1\n"
+    program.write_text(body, encoding="utf-8")
+    program.chmod(0o700)
+    original_run = adapter._run
+    injected = False
+
+    def inject_after_selected_git_phase(
+        args: tuple[str, ...],
+        *,
+        allowed_codes: tuple[int, ...] = (0,),
+        input_data: bytes | None = None,
+    ) -> bytes:
+        nonlocal injected
+        output = original_run(
+            args,
+            allowed_codes=allowed_codes,
+            input_data=input_data,
+        )
+        if args and args[0] == trigger_command and not injected:
+            injected = True
+            (repo.root / ".gitattributes").write_text(
+                "README.md filter=probe\n", encoding="utf-8"
+            )
+            repo.git("config", f"filter.probe.{driver}", os.fspath(program))
+            metadata = (repo.root / "README.md").stat()
+            os.utime(
+                repo.root / "README.md",
+                ns=(metadata.st_atime_ns, metadata.st_mtime_ns + 1_000_000_000),
+            )
+        return output
+
+    monkeypatch.setattr(adapter, "_run", inject_after_selected_git_phase)
+    with pytest.raises(CaptureUnknownError):
+        adapter.capture(())
+    assert injected
+    assert not sentinel.exists()
+
+
+def test_present_but_malformed_git_locator_is_unknown(tmp_path: Path) -> None:
+    target = tmp_path / "malformed-repository"
+    target.mkdir()
+    (target / ".git").write_text("not a gitfile\n", encoding="utf-8")
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(target)
+
+
+def test_clean_status_digest_is_direct_proof_not_empty_porcelain(
+    tmp_path: Path,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    snapshot = GitTargetAdapter(repo.root).capture(())
+
+    assert snapshot.target.is_clean
+    assert snapshot.target.status_digest != digest_bytes(b"")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "tracked-attributes",
+        "info-attributes",
+        "include",
+        "autocrlf",
+        "eol",
+        "filter",
+        "sparse",
+    ],
+)
+def test_every_conversion_or_sparse_source_is_unknown(
+    tmp_path: Path, source: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    if source == "tracked-attributes":
+        (repo.root / ".gitattributes").write_text("README.md -text\n", encoding="utf-8")
+        repo.git("add", ".gitattributes")
+        repo.git("commit", "-q", "-m", "attributes")
+    elif source == "info-attributes":
+        (repo.git_dir / "info" / "attributes").write_text(
+            "README.md -text\n", encoding="utf-8"
+        )
+    elif source == "include":
+        included = tmp_path / "included-config"
+        included.write_text("[core]\n\tautocrlf = false\n", encoding="utf-8")
+        repo.git("config", "include.path", os.fspath(included))
+    elif source == "autocrlf":
+        repo.git("config", "core.autocrlf", "true")
+    elif source == "eol":
+        repo.git("config", "core.eol", "crlf")
+    elif source == "filter":
+        repo.git("config", "filter.probe.clean", "cat")
+    else:
+        repo.git("config", "core.sparseCheckout", "true")
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize(
+    "index_state", ["split", "skip-worktree", "intent-to-add", "unmerged"]
+)
+def test_unsupported_index_semantics_are_unknown(
+    tmp_path: Path, index_state: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    if index_state == "split":
+        repo.git("update-index", "--split-index")
+    elif index_state == "skip-worktree":
+        repo.git("update-index", "--skip-worktree", "README.md")
+    elif index_state == "intent-to-add":
+        (repo.root / "intent.txt").write_text("intent\n", encoding="utf-8")
+        repo.git("add", "-N", "intent.txt")
+    else:
+        oid = repo.git("rev-parse", "HEAD:README.md").strip()
+        repo.git("rm", "-q", "--cached", "README.md")
+        rows = b"".join(
+            b"100644 " + oid + f" {stage}\tREADME.md\n".encode("ascii")
+            for stage in (1, 2, 3)
+        )
+        subprocess.run(
+            ["git", "-C", os.fspath(repo.root), "update-index", "--index-info"],
+            input=rows,
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_gitlink_tree_entry_is_unknown(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    repo.git(
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{head},nested-repository",
+    )
+    repo.git("commit", "-q", "-m", "gitlink")
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_unknown_optional_index_extension_is_unknown(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    index_path = repo.git_dir / "index"
+    raw_index = index_path.read_bytes()
+    body = raw_index[:-20] + b"ZZZZ" + struct.pack("!I", 0)
+    index_path.write_bytes(body + hashlib.sha1(body).digest())
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_unsupported_raw_index_mode_is_unknown(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    index_path = repo.git_dir / "index"
+    raw_index = bytearray(index_path.read_bytes())
+    struct.pack_into("!I", raw_index, 12 + 24, 0o100600)
+    body = bytes(raw_index[:-20])
+    index_path.write_bytes(body + hashlib.sha1(body).digest())
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_sha256_repository_uses_exact_local_blob_framing(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path, object_format="sha256")
+    snapshot = GitTargetAdapter(repo.root).capture((b"README.md",))
+
+    assert len(snapshot.target.head_oid) == 64
+    assert len(snapshot.instructions[0].blob_oid) == 64
+    assert snapshot.target.is_clean
+
+
+def test_dual_object_format_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    adapter = GitTargetAdapter(repo.root)
+    original_run = adapter._run
+
+    def report_dual_format(
+        args: tuple[str, ...],
+        *,
+        allowed_codes: tuple[int, ...] = (0,),
+        input_data: bytes | None = None,
+    ) -> bytes:
+        if args == ("rev-parse", "--show-object-format=input"):
+            return b"sha1 sha256\n"
+        return original_run(
+            args,
+            allowed_codes=allowed_codes,
+            input_data=input_data,
+        )
+
+    monkeypatch.setattr(adapter, "_run", report_dual_format)
+    with pytest.raises(CaptureUnknownError):
+        adapter.capture(())
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit_value"),
+    [
+        ("_MAX_TRAVERSAL_DEPTH", 1),
+        ("_MAX_TRAVERSAL_ENTRIES", 2),
+        ("_MAX_TOTAL_PATH_BYTES", 8),
+        ("_MAX_FILE_BYTES", 4),
+        ("_MAX_TOTAL_FILE_BYTES", 4),
+        ("_MAX_CAPTURE_SECONDS", 1e-9),
+    ],
+)
+def test_capture_resource_limits_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+    limit_value: int | float,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    monkeypatch.setattr(git_capture, limit_name, limit_value)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_elapsed_limit_is_rechecked_after_final_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    adapter = GitTargetAdapter(repo.root)
+    original_observe = adapter._observe
+    clock = 0.0
+    observation_count = 0
+
+    def monotonic() -> float:
+        return clock
+
+    def advance_after_final_observation(
+        requested: tuple[object, ...],
+    ) -> object:
+        nonlocal clock, observation_count
+        result = original_observe(requested)  # type: ignore[arg-type]
+        observation_count += 1
+        if observation_count == 2:
+            clock = 2.0
+        return result
+
+    monkeypatch.setattr(git_capture, "_MAX_CAPTURE_SECONDS", 1.0)
+    monkeypatch.setattr(git_capture.time, "monotonic", monotonic)
+    monkeypatch.setattr(adapter, "_observe", advance_after_final_observation)
+
+    with pytest.raises(CaptureUnknownError):
+        adapter.capture(())
+
+
+def test_tracked_parent_directory_rename_swap_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    replacement = tmp_path / "replacement-docs"
+    replacement.mkdir()
+    (replacement / "guide.txt").write_text("guide\n", encoding="utf-8")
+    displaced = tmp_path / "displaced-docs"
+    real_listdir = os.listdir
+    swapped = False
+
+    def swap_after_parent_listing(path: int | str | bytes) -> list[str]:
+        nonlocal swapped
+        result = real_listdir(path)
+        if not swapped and result == ["guide.txt"]:
+            (repo.root / "docs").rename(displaced)
+            replacement.rename(repo.root / "docs")
+            swapped = True
+        return result
+
+    monkeypatch.setattr(os, "listdir", swap_after_parent_listing)
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+    assert swapped
+
+
+@pytest.mark.parametrize("returncode", [1, -9])
+def test_present_git_with_abnormal_initial_result_is_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+) -> None:
+    repo = make_git_repo(tmp_path)
+
+    def abnormal_result(*_args: object, **_kwargs: object) -> object:
+        return git_capture._BoundedResult(returncode, b"", b"redacted")
+
+    monkeypatch.setattr(git_capture, "_run_bounded", abnormal_result)
+    with pytest.raises(CaptureUnknownError) as captured:
+        GitTargetAdapter(repo.root)
+    assert "redacted" not in str(captured.value)
+
+
+def test_git_locator_symlink_is_unknown(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    real_git = tmp_path / "real-git"
+    repo.git_dir.rename(real_git)
+    os.symlink(real_git, repo.git_dir)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root)
+
+
+def test_untracked_symlink_directory_is_never_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    outside = tmp_path / "outside-directory"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside\n", encoding="utf-8")
+    os.symlink(outside, repo.root / "outside-link")
+    outside_identity = (outside.stat().st_dev, outside.stat().st_ino)
+    real_listdir = os.listdir
+
+    def refuse_outside_listing(path: int | str | bytes) -> list[str]:
+        if isinstance(path, int):
+            metadata = os.fstat(path)
+            assert (metadata.st_dev, metadata.st_ino) != outside_identity
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", refuse_outside_listing)
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_remote_identity_export_contains_only_digest(tmp_path: Path) -> None:
+    remote = "ssh://git@example.invalid/private/repository.git"
+    repo = make_git_repo(tmp_path, remote=remote)
+    snapshot = GitTargetAdapter(repo.root).capture(())
+    exported = canonical_bytes(target_identity_payload(snapshot.target))
+
+    assert snapshot.target.sanitized_remote_identity_digest is not None
+    assert remote.encode("utf-8") not in exported
+    assert b"private/repository" not in exported

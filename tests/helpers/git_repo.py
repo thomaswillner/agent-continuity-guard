@@ -21,7 +21,16 @@ class GitRepo:
 
     def git(self, *args: str, check: bool = True) -> bytes:
         result = subprocess.run(
-            ["git", "-C", os.fspath(self.root), *args],
+            [
+                "git",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "-C",
+                os.fspath(self.root),
+                *args,
+            ],
             check=check,
             capture_output=True,
             env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
@@ -30,11 +39,19 @@ class GitRepo:
         return result.stdout
 
 
-def make_git_repo(base: Path, *, remote: str | None = None) -> GitRepo:
+def make_git_repo(
+    base: Path,
+    *,
+    remote: str | None = None,
+    object_format: str | None = None,
+) -> GitRepo:
     root = base / "synthetic-target"
     root.mkdir()
     repo = GitRepo(root)
-    repo.git("init", "-q")
+    init_args = ["init", "-q"]
+    if object_format is not None:
+        init_args.append(f"--object-format={object_format}")
+    repo.git(*init_args)
     repo.git("config", "user.name", "Synthetic Test")
     repo.git("config", "user.email", "synthetic@example.invalid")
     (root / "README.md").write_text("synthetic target\n", encoding="utf-8")

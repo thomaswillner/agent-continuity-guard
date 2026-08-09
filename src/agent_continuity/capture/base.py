@@ -7,7 +7,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from agent_continuity.kernel.canonical import CanonicalJSONError, digest_bytes
+from agent_continuity.kernel.canonical import (
+    CanonicalJSONError,
+    canonical_bytes,
+    digest_bytes,
+)
 from agent_continuity.kernel.capabilities import CapabilityClaimV1
 from agent_continuity.kernel.model import Digest, JsonObject, StoredRecord
 from agent_continuity.kernel.paths import PathIdentityV1, path_identity_payload
@@ -18,6 +22,17 @@ from agent_continuity.kernel.records import (
 )
 
 _OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+DIRECT_CLEAN_STATUS_DIGEST = digest_bytes(
+    canonical_bytes(
+        {
+            "conversion_eligibility": "proven",
+            "head_tree_equals_index": "proven",
+            "index_equals_worktree": "proven",
+            "no_non_index_paths": "proven",
+            "observer_version": "direct-git-v2",
+        }
+    )
+)
 
 
 class CaptureError(RuntimeError):
@@ -102,7 +117,7 @@ class TargetIdentityV1:
 
     @property
     def is_clean(self) -> bool:
-        return self.status_digest == digest_bytes(b"")
+        return self.status_digest == DIRECT_CLEAN_STATUS_DIGEST
 
     def record(self) -> StoredRecord:
         return make_record("TargetIdentity", target_identity_payload(self))
