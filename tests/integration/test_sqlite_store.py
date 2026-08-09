@@ -61,6 +61,19 @@ def _table_count(path: Path, table: str) -> int:
     return int(value[0])
 
 
+def _durable_store_rows(path: Path) -> dict[str, list[tuple[Any, ...]]]:
+    with sqlite3.connect(path) as connection:
+        return {
+            table: connection.execute(f"SELECT * FROM {table}").fetchall()
+            for table in (
+                "records",
+                "sensitive_local_values",
+                "audit_events",
+                "heads",
+            )
+        }
+
+
 def test_genesis_commit_persists_only_approved_typed_local_values(
     tmp_path: Path,
 ) -> None:
@@ -191,6 +204,45 @@ def test_audit_details_reject_unclassified_string_bytes(
 
     with pytest.raises(StoreValidationError):
         _event(record.record_id, details)
+
+
+@pytest.mark.parametrize(
+    ("key", "sentinel"),
+    [
+        ("code", "PRIVATE_SOURCE_EXCERPT"),
+        ("status", "PRIVATE_STATUS_EXCERPT"),
+    ],
+)
+def test_audit_details_cannot_persist_arbitrary_identifier_text(
+    tmp_path: Path,
+    key: str,
+    sentinel: str,
+) -> None:
+    path = tmp_path / f"{key}.sqlite3"
+    record = _record(f"private-{key}")
+
+    with _open_store(path) as store:
+        before_bytes = path.read_bytes()
+        before_rows = _durable_store_rows(path)
+        event = _event(record.record_id)
+        event.details[key] = sentinel
+        observed_error: Exception | None = None
+        try:
+            store.commit(
+                records=(record,),
+                event=event,
+                head_name="checkpoint",
+                expected_head=None,
+                new_head_id=record.record_id,
+            )
+        except (StoreIntegrityError, StoreValidationError) as error:
+            observed_error = error
+        assert store.read_audit_head() is None
+        assert _durable_store_rows(path) == before_rows
+        assert path.read_bytes() == before_bytes
+        assert type(observed_error) is StoreValidationError
+
+    assert sentinel.encode("utf-8") not in path.read_bytes()
 
 
 def test_public_collections_reject_duplicate_identities_before_transaction(
@@ -468,6 +520,54 @@ def test_precommit_faults_roll_back_every_table(tmp_path: Path, stage: str) -> N
                 new_head_id=record.record_id,
             )
         assert store.read_audit_head() is None
+
+    for table in ("records", "sensitive_local_values", "audit_events", "heads"):
+        assert _table_count(path, table) == 0
+
+
+def test_before_commit_target_drift_has_zero_durable_effects(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    target = path.parent.parent / f"{path.parent.name}-{path.name}-target"
+    retained_target = target.with_name(target.name + "-retained")
+    record = _record("before-commit-target-drift")
+    drifted = False
+
+    def inject(stage: str) -> None:
+        nonlocal drifted
+        if stage != "before_commit":
+            return
+        target.rename(retained_target)
+        target.mkdir(mode=0o700)
+        (target / ".git").mkdir(mode=0o700)
+        drifted = True
+
+    with _open_store(path, fault_injector=inject) as store:
+        before_bytes = path.read_bytes()
+        before_rows = _durable_store_rows(path)
+        try:
+            with pytest.raises(StoreIntegrityError):
+                store.commit(
+                    records=(record,),
+                    event=_event(record.record_id),
+                    head_name="checkpoint",
+                    expected_head=None,
+                    new_head_id=record.record_id,
+                )
+        finally:
+            if drifted:
+                (target / ".git").rmdir()
+                target.rmdir()
+                retained_target.rename(target)
+
+        assert path.read_bytes() == before_bytes
+        assert _durable_store_rows(path) == before_rows
+        assert store.read_audit_head() is None
+        assert store.read_head("checkpoint") is None
+
+    with _open_store(path) as reopened:
+        assert reopened.read_audit_head() is None
+        assert reopened.read_head("checkpoint") is None
+        assert reopened.verify_audit().valid is True
 
     for table in ("records", "sensitive_local_values", "audit_events", "heads"):
         assert _table_count(path, table) == 0

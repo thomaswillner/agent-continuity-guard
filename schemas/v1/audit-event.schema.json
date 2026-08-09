@@ -7,56 +7,15 @@
       "$ref": "#/$defs/auditDetails"
     },
     "head_updates": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "expected": {
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "audit_event_id": {
-                    "$ref": "#/$defs/digest"
-                  },
-                  "audit_sequence": {
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "record_id": {
-                    "$ref": "#/$defs/digest"
-                  }
-                },
-                "required": [
-                  "audit_event_id",
-                  "audit_sequence",
-                  "record_id"
-                ],
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "name": {
-            "maxLength": 256,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
-            "type": "string"
-          },
-          "new_record_id": {
-            "$ref": "#/$defs/digest"
-          }
-        },
-        "required": [
-          "expected",
-          "name",
-          "new_record_id"
-        ],
-        "type": "object"
+      "additionalProperties": {
+        "$ref": "#/$defs/headUpdate"
       },
-      "minItems": 1,
-      "type": "array",
-      "uniqueItems": true
+      "minProperties": 1,
+      "propertyNames": {
+        "maxLength": 256,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+      },
+      "type": "object"
     },
     "inserted_record_ids": {
       "items": {
@@ -144,12 +103,25 @@
   "x-record-type": "AuditEvent/v1",
   "$defs": {
     "auditDetails": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth1"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsBase": {
       "additionalProperties": false,
       "maxProperties": 64,
       "properties": {
-        "code": {
-          "$ref": "#/$defs/publicIdentifier"
-        },
         "count": {
           "minimum": 0,
           "type": "integer"
@@ -169,9 +141,6 @@
           "type": "boolean"
         },
         "items": {
-          "items": {
-            "$ref": "#/$defs/auditDetails"
-          },
           "maxItems": 64,
           "type": "array",
           "uniqueItems": true
@@ -193,23 +162,186 @@
         "sequence": {
           "minimum": 0,
           "type": "integer"
-        },
-        "status": {
-          "$ref": "#/$defs/publicIdentifier"
         }
       },
       "type": "object"
+    },
+    "auditDetailsDepth1": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth2"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth3"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth3": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth4"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth4": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth5"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth5": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth6"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth6": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth7"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth7": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/auditDetailsDepth8"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "auditDetailsDepth8": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/auditDetailsBase"
+        },
+        {
+          "properties": {
+            "items": {
+              "maxItems": 0
+            }
+          }
+        }
+      ]
     },
     "digest": {
       "pattern": "^sha256:[0-9a-f]{64}$",
       "type": "string"
     },
+    "headState": {
+      "additionalProperties": false,
+      "properties": {
+        "audit_event_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "audit_sequence": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "record_id": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "audit_event_id",
+        "audit_sequence",
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "headUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "expected": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/headState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "new_record_id": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "expected",
+        "new_record_id"
+      ],
+      "type": "object"
+    },
     "logicalTime": {
       "pattern": "^(?:(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01]))|(?:(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30))|(?:02-(?:0[1-9]|1[0-9]|2[0-8])))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
-      "type": "string"
-    },
-    "publicIdentifier": {
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$",
       "type": "string"
     }
   }

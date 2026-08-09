@@ -16,6 +16,10 @@ from agent_continuity.kernel.canonical import (
     validate_logical_time,
 )
 from agent_continuity.kernel.capabilities import CapabilityClaimV1
+from agent_continuity.store import (
+    AuditEventDraft,
+    StoreValidationError,
+)
 from tools import verify_schemas
 
 SCHEMA_ROOT = Path(__file__).parents[2] / "schemas" / "v1"
@@ -266,23 +270,6 @@ def test_default_validator_logical_time_matches_runtime_gregorian_calendar() -> 
                 ]
             },
         ),
-        (
-            "audit-event.schema.json",
-            {
-                "head_updates": [
-                    {
-                        "expected": None,
-                        "name": "head:a",
-                        "new_record_id": "sha256:" + "1" * 64,
-                    },
-                    {
-                        "expected": None,
-                        "name": "head:a",
-                        "new_record_id": "sha256:" + "1" * 64,
-                    },
-                ]
-            },
-        ),
     ],
 )
 def test_public_schema_validator_matches_runtime_contract(
@@ -300,6 +287,66 @@ def test_public_schema_validator_matches_runtime_contract(
         validator.validate(invalid)
 
 
+def test_default_validator_rejects_duplicate_head_name_payload() -> None:
+    schemas = _schemas()
+    validator = Draft202012Validator(
+        schemas["audit-event.schema.json"], registry=_registry(schemas)
+    )
+    invalid = {
+        **verify_schemas.schema_goldens()["audit-event.schema.json"],
+        "head_updates": [
+            {
+                "expected": None,
+                "name": "head:a",
+                "new_record_id": "sha256:" + "1" * 64,
+            },
+            {
+                "expected": None,
+                "name": "head:a",
+                "new_record_id": "sha256:" + "2" * 64,
+            },
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(invalid)
+
+
+def _nested_audit_details(nesting: int) -> dict[str, Any]:
+    details: dict[str, Any] = {"digest": "sha256:" + "1" * 64}
+    for _ in range(nesting):
+        details = {"items": [details]}
+    return details
+
+
+def test_default_validator_audit_detail_depth_matches_runtime_boundary() -> None:
+    schemas = _schemas()
+    validator = Draft202012Validator(
+        schemas["audit-event.schema.json"], registry=_registry(schemas)
+    )
+    golden = verify_schemas.schema_goldens()["audit-event.schema.json"]
+    at_limit = _nested_audit_details(8)
+    beyond_limit = _nested_audit_details(9)
+
+    validator.validate({**golden, "details": at_limit})
+    AuditEventDraft(
+        kind=golden["kind"],
+        subject_id=golden["subject_id"],
+        logical_time=golden["logical_time"],
+        details=at_limit,
+    )
+
+    with pytest.raises(ValidationError):
+        validator.validate({**golden, "details": beyond_limit})
+    with pytest.raises(StoreValidationError):
+        AuditEventDraft(
+            kind=golden["kind"],
+            subject_id=golden["subject_id"],
+            logical_time=golden["logical_time"],
+            details=beyond_limit,
+        )
+
+
 def test_audit_schema_accepts_unsorted_unique_collections_for_runtime_normalization(
 ) -> None:
     schemas = _schemas()
@@ -310,10 +357,10 @@ def test_audit_schema_accepts_unsorted_unique_collections_for_runtime_normalizat
     digest_b = "sha256:" + "2" * 64
     instance = {
         **verify_schemas.schema_goldens()["audit-event.schema.json"],
-        "head_updates": [
-            {"expected": None, "name": "head:b", "new_record_id": digest_b},
-            {"expected": None, "name": "head:a", "new_record_id": digest_a},
-        ],
+        "head_updates": {
+            "head:b": {"expected": None, "new_record_id": digest_b},
+            "head:a": {"expected": None, "new_record_id": digest_a},
+        },
         "inserted_record_ids": [digest_b, digest_a],
         "record_ids": [digest_b, digest_a],
     }

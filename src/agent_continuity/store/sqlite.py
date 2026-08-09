@@ -228,9 +228,12 @@ def _normalize_head_updates(updates: Sequence[HeadUpdate]) -> tuple[HeadUpdate, 
 def _head_update_payload(update: HeadUpdate) -> JsonObject:
     return {
         "expected": _head_payload(update.expected),
-        "name": update.name,
         "new_record_id": update.new_record_id,
     }
+
+
+def _head_updates_payload(updates: tuple[HeadUpdate, ...]) -> JsonObject:
+    return {update.name: _head_update_payload(update) for update in updates}
 
 
 def _local_value_payload(value: SensitiveLocalValueDraft) -> JsonObject:
@@ -709,8 +712,8 @@ class SQLiteStateStore:
         head_updates: tuple[HeadUpdate, ...],
     ) -> JsonObject:
         return {
-            "details": event.details,
-            "head_updates": [_head_update_payload(item) for item in head_updates],
+            "details": _normalize_audit_details(event.details),
+            "head_updates": _head_updates_payload(head_updates),
             "kind": event.kind,
             "local_values": [_local_value_payload(item) for item in local_values],
             "logical_time": event.logical_time,
@@ -973,6 +976,7 @@ class SQLiteStateStore:
             self._fault("after_head")
             receipt = MultiHeadCommitReceipt(tuple(heads), inserted)
             self._fault("before_commit")
+            self._assert_database_live()
             self._connection.execute("COMMIT")
             committed = True
         except Exception:
@@ -1170,18 +1174,17 @@ class SQLiteStateStore:
                     )
                 referenced_locals.update(local_identities)
                 updates = payload["head_updates"]
-                if type(updates) is not list:
+                if type(updates) is not dict or not updates:
                     raise StoreIntegrityError("audit head updates are invalid")
                 update_names: list[str] = []
-                for item in updates:
+                for name in sorted(updates):
+                    item = updates[name]
                     if type(item) is not dict or set(item) != {
                         "expected",
-                        "name",
                         "new_record_id",
                     }:
                         raise StoreIntegrityError("audit head update is invalid")
                     item_object = cast(dict[str, object], item)
-                    name = cast(str, item_object["name"])
                     require_head_name(name)
                     expected = _head_from_payload(item_object["expected"])
                     if replayed_heads.get(name) != expected:

@@ -239,8 +239,10 @@ def test_trusted_anchor_blocks_write_after_anchored_history_truncation(
                 rewritten_first = record_id("AuditEvent/v1", "v1", first_payload)
                 second_payload["previous_event_id"] = rewritten_first
                 updates = second_payload["head_updates"]
-                assert isinstance(updates, list) and isinstance(updates[0], dict)
-                expected = updates[0]["expected"]
+                assert isinstance(updates, dict)
+                update = updates["checkpoint"]
+                assert isinstance(update, dict)
+                expected = update["expected"]
                 assert isinstance(expected, dict)
                 expected["audit_event_id"] = rewritten_first
                 rewritten_second = record_id("AuditEvent/v1", "v1", second_payload)
@@ -366,16 +368,18 @@ def test_audit_replay_rejects_future_record_reference(tmp_path: Path) -> None:
                 [first.record_id, second.record_id]
             )
             first_updates = first_payload["head_updates"]
-            assert isinstance(first_updates, list)
-            assert isinstance(first_updates[0], dict)
-            first_updates[0]["new_record_id"] = second.record_id
+            assert isinstance(first_updates, dict)
+            first_update = first_updates["checkpoint"]
+            assert isinstance(first_update, dict)
+            first_update["new_record_id"] = second.record_id
             first_event_id = record_id("AuditEvent/v1", "v1", first_payload)
 
             second_payload["previous_event_id"] = first_event_id
             second_updates = second_payload["head_updates"]
-            assert isinstance(second_updates, list)
-            assert isinstance(second_updates[0], dict)
-            second_updates[0]["expected"] = {
+            assert isinstance(second_updates, dict)
+            second_update = second_updates["checkpoint"]
+            assert isinstance(second_update, dict)
+            second_update["expected"] = {
                 "audit_event_id": first_event_id,
                 "audit_sequence": 1,
                 "record_id": second.record_id,

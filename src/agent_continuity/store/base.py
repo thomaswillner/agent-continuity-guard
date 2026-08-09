@@ -28,7 +28,6 @@ _MAX_AUDIT_DETAIL_DEPTH = 8
 _MAX_AUDIT_DETAIL_ITEMS = 64
 _AUDIT_DETAIL_KEYS = frozenset(
     {
-        "code",
         "count",
         "digest",
         "digests",
@@ -38,7 +37,6 @@ _AUDIT_DETAIL_KEYS = frozenset(
         "record_id",
         "record_ids",
         "sequence",
-        "status",
     }
 )
 
@@ -100,16 +98,6 @@ def _normalize_audit_details(value: object, *, depth: int = 0) -> JsonObject:
             if len(identities) != len(set(identities)):
                 raise StoreValidationError("audit detail digests must be unique")
             normalized[key] = cast(JsonValue, sorted(identities))
-        elif key in {"code", "status"}:
-            if type(item) is not str:
-                raise StoreValidationError("audit detail identifier is invalid")
-            try:
-                require_public_component(item, field=f"audit detail {key}")
-            except ValueError as error:
-                raise StoreValidationError(
-                    "audit detail identifier is invalid"
-                ) from error
-            normalized[key] = item
         elif key == "logical_time":
             if type(item) is not str:
                 raise StoreValidationError("audit detail logical time is invalid")

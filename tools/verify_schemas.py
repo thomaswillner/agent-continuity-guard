@@ -149,13 +149,12 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
         },
         "audit-event.schema.json": {
             "details": {},
-            "head_updates": [
-                {
+            "head_updates": {
+                "checkpoint": {
                     "expected": None,
-                    "name": "checkpoint",
                     "new_record_id": digest,
                 }
-            ],
+            },
             "inserted_record_ids": [digest],
             "kind": "checkpoint",
             "local_values": [],
