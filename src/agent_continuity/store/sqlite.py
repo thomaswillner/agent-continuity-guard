@@ -821,6 +821,10 @@ class SQLiteStateStore:
                     local_identities.append(identity)
                 if local_identities != sorted(set(local_identities)):
                     raise StoreIntegrityError("audit local values are not ordered")
+                if sequence != 1 and local_identities:
+                    raise StoreIntegrityError(
+                        "sensitive-local values originate only at genesis"
+                    )
                 referenced_locals.update(local_identities)
                 updates = payload["head_updates"]
                 if type(updates) is not list:

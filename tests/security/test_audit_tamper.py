@@ -9,6 +9,7 @@ from agent_continuity.kernel.audit import AuditAnchorV1
 from agent_continuity.kernel.canonical import (
     canonical_bytes,
     canonical_loads,
+    digest_bytes,
     record_id,
     validate_logical_time,
 )
@@ -242,6 +243,66 @@ def test_audit_replay_rejects_future_record_reference(tmp_path: Path) -> None:
 
     with _store(path) as store:
         assert store.verify_audit().valid is False
+
+
+def test_audit_replay_rejects_post_genesis_local_value_after_anchor(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    first = _record("first")
+    second = _record("second")
+    with _store(path) as store:
+        first_receipt = store.commit(
+            records=(first,),
+            event=_event(first),
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=first.record_id,
+        )
+        anchor = store.make_anchor(
+            created_at=validate_logical_time("2026-08-09T12:01:00Z"),
+            label=None,
+        )
+        store.commit(
+            records=(second,),
+            event=_event(second),
+            head_name="checkpoint",
+            expected_head=first_receipt.head,
+            new_head_id=second.record_id,
+        )
+
+    late_bytes = b"late goal"
+    late_digest = digest_bytes(late_bytes)
+    with sqlite3.connect(path) as connection:
+        _drop_immutable_triggers(connection, "audit_events")
+        connection.execute(
+            "INSERT INTO sensitive_local_values(digest, kind, value) "
+            "VALUES (?, 'goal_text', ?)",
+            (late_digest, sqlite3.Binary(late_bytes)),
+        )
+        row = connection.execute(
+            "SELECT canonical_bytes FROM audit_events WHERE sequence = 2"
+        ).fetchone()
+        assert row is not None
+        payload = canonical_loads(bytes(row[0]))
+        payload["local_values"] = [
+            {"digest": late_digest, "kind": "goal_text"}
+        ]
+        rewritten_event_id = record_id("AuditEvent/v1", "v1", payload)
+        connection.execute(
+            "UPDATE audit_events SET event_id = ?, canonical_bytes = ? "
+            "WHERE sequence = 2",
+            (rewritten_event_id, canonical_bytes(payload)),
+        )
+        connection.execute(
+            "UPDATE heads SET audit_event_id = ? WHERE name = 'checkpoint'",
+            (rewritten_event_id,),
+        )
+
+    with _store(path) as store:
+        verification = store.verify_audit(anchor)
+    assert verification.valid is False
+    assert verification.supplied_anchor_matched is False
 
 
 def test_foreign_or_rewritten_anchor_fails_closed(tmp_path: Path) -> None:
