@@ -71,7 +71,7 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         raise SchemaVerificationError("invalid_golden")
 
 
-def _goldens() -> dict[str, dict[str, Any]]:
+def schema_goldens() -> dict[str, dict[str, Any]]:
     digest = "sha256:" + "1" * 64
     capability = {
         "adapter_id": "acg-git",
@@ -159,7 +159,7 @@ def main() -> int:
             )
         except Exception as error:
             raise SchemaVerificationError("invalid_schema_metadata") from error
-        goldens = _goldens()
+        goldens = schema_goldens()
         if set(goldens) != set(schemas):
             raise SchemaVerificationError("golden_coverage_mismatch")
         for name, positive in goldens.items():

@@ -8,7 +8,7 @@ import pytest
 from jsonschema import Draft202012Validator, ValidationError
 from referencing import Registry, Resource
 
-from agent_continuity.capture.base import TargetIdentityV1, target_identity_payload
+from agent_continuity.capture import TargetIdentityV1, target_identity_payload
 from agent_continuity.kernel.canonical import (
     CanonicalJSONError,
     canonical_bytes,
@@ -169,7 +169,7 @@ def test_capture_schemas_accept_strict_golden_records() -> None:
 
 
 def test_capture_goldens_have_complete_independent_tool_parity() -> None:
-    tool_goldens = verify_schemas._goldens()
+    tool_goldens = verify_schemas.schema_goldens()
     capture_goldens = _capture_schema_goldens()
 
     assert {name: tool_goldens[name] for name in capture_goldens} == capture_goldens
@@ -389,7 +389,7 @@ def test_schema_verifier_normalizes_every_expected_failure_as_canonical_json(
     (root / first_name).write_text(json.dumps(first), encoding="utf-8")
     monkeypatch.setattr(verify_schemas, "SCHEMA_ROOT", root)
     monkeypatch.setattr(verify_schemas, "SCHEMA_REGISTRY", registry)
-    monkeypatch.setattr(verify_schemas, "_goldens", lambda: goldens)
+    monkeypatch.setattr(verify_schemas, "schema_goldens", lambda: goldens)
 
     exit_code = verify_schemas.main()
     captured = capfd.readouterr()

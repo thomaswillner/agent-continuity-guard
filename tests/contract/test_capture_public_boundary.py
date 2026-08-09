@@ -4,6 +4,8 @@ import ast
 from pathlib import Path
 
 TASK3_TESTS = (
+    Path(__file__),
+    Path(__file__).with_name("test_plan1_schemas.py"),
     Path(__file__).parents[1] / "integration" / "test_git_capture.py",
     Path(__file__).parents[1] / "security" / "test_state_root_separation.py",
 )
