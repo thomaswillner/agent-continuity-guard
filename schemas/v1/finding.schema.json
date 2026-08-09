@@ -1,0 +1,52 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/finding.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "json": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer"},
+        {"pattern": "^[^\\u0000-\\u001f]*$", "type": "string"},
+        {"items": {"$ref": "#/$defs/json"}, "type": "array"},
+        {
+          "additionalProperties": {"$ref": "#/$defs/json"},
+          "propertyNames": {"pattern": "^[^\\u0000-\\u001f]*$"},
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "type": "string"
+    },
+    "integrity_failure": {"type": "boolean"},
+    "message_id": {
+      "maxLength": 192,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "type": "string"
+    },
+    "parameters": {
+      "additionalProperties": {"$ref": "#/$defs/json"},
+      "propertyNames": {"pattern": "^[^\\u0000-\\u001f]*$"},
+      "type": "object"
+    },
+    "subject_id": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "verdict": {"enum": ["pass", "warn", "unknown", "block"]}
+  },
+  "required": [
+    "code",
+    "integrity_failure",
+    "message_id",
+    "parameters",
+    "subject_id",
+    "verdict"
+  ],
+  "title": "Finding/v1",
+  "type": "object",
+  "x-record-type": "Finding/v1"
+}

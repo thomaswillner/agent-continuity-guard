@@ -1,0 +1,32 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/fact.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "scalar": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "integer"},
+        {"pattern": "^[^\\u0000-\\u001f]*$", "type": "string"}
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "field_path": {
+      "items": {
+        "maxLength": 64,
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+        "type": "string"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "type": "array"
+    },
+    "value": {"$ref": "#/$defs/scalar"}
+  },
+  "required": ["field_path", "value"],
+  "title": "Fact/v1",
+  "type": "object",
+  "x-record-type": "Fact/v1"
+}

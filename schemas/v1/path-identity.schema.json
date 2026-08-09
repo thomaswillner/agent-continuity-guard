@@ -1,0 +1,27 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/path-identity.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "case_key_b64": {
+      "anyOf": [
+        {"pattern": "^[A-Za-z0-9_-]+$", "type": "string"},
+        {"type": "null"}
+      ]
+    },
+    "encoding": {
+      "enum": ["posix-bytes", "git-path-bytes", "windows-utf16le"]
+    },
+    "raw_b64": {"pattern": "^[A-Za-z0-9_-]+$", "type": "string"},
+    "segment_offsets": {
+      "items": {"minimum": 0, "type": "integer"},
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": ["case_key_b64", "encoding", "raw_b64", "segment_offsets"],
+  "title": "PathIdentity/v1",
+  "type": "object",
+  "x-record-type": "PathIdentity/v1"
+}

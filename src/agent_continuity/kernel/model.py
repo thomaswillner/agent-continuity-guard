@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import NewType, TypeAlias
 
 JsonScalar: TypeAlias = bool | int | str | None
@@ -13,6 +14,13 @@ RecordId = NewType("RecordId", str)
 Digest = NewType("Digest", str)
 LogicalTime = NewType("LogicalTime", str)
 SensitiveLocalText = NewType("SensitiveLocalText", str)
+
+
+class AssignmentAuthority(StrEnum):
+    """Authority declared for an external assignment actor."""
+
+    READ_ONLY = "read_only"
+    SCOPED_WRITE = "scoped_write"
 
 
 @dataclass(frozen=True, slots=True)

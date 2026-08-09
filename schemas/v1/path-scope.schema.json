@@ -1,0 +1,28 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/path-scope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "file"}}, "required": ["kind"]},
+      "then": {
+        "properties": {
+          "path": {"$ref": "https://agent-continuity-guard.dev/schemas/v1/path-identity.schema.json"}
+        }
+      }
+    }
+  ],
+  "properties": {
+    "kind": {"enum": ["file", "tree"]},
+    "path": {
+      "anyOf": [
+        {"$ref": "https://agent-continuity-guard.dev/schemas/v1/path-identity.schema.json"},
+        {"type": "null"}
+      ]
+    }
+  },
+  "required": ["kind", "path"],
+  "title": "PathScope/v1",
+  "type": "object",
+  "x-record-type": "PathScope/v1"
+}
