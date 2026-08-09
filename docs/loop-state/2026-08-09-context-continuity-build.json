@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 5,
+  "revision": 6,
   "contract": {
     "revision": 1,
     "goal": {
@@ -67,7 +67,8 @@
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
       "Added provisional 80K/120K/160K cumulative ceilings alongside 50/65/75 percent rendered-context ratios, with earliest strongest action winning.",
-      "Added deterministic below-threshold canonical-ID probes, verified meta-handoff lineage, adapter capability qualification, and a frozen synthetic continuity benchmark contract."
+      "Added deterministic below-threshold canonical-ID probes, verified meta-handoff lineage, adapter capability qualification, and a frozen synthetic continuity benchmark contract.",
+      "Bound calibration identity to provider/model/route/harness/prompts/usage/tool-schema/workload/transition and added earlier phase, risk, operator, and tool-output boundary signals."
     ]
   },
   "gates": [

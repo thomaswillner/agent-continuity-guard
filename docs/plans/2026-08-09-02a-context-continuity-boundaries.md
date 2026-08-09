@@ -29,6 +29,7 @@
 - The 50%/65%/75% ratios and 80,000/120,000/160,000 absolute ceilings are operational seed defaults with exact status `PROVISIONAL_UNCALIBRATED`. They require a frozen provider/model/route/harness/workload/tool-schema/transition profile and behavioral calibration before any production safety claim. They are not universal empirical breakpoints; `200,000` is not treated as a cross-model safety boundary.
 - Thresholds use integer basis points and integer tokens. Floats are forbidden.
 - Deterministic continuity probes run at bounded cadence even below budget thresholds. The agent must return requested canonical record IDs through a structured adapter result; missing protected IDs, contradictions against canonical records, unknown substitutions, or authority broadening require handoff or BLOCK. Confidence, prose acknowledgment, and self-reported recall never pass a probe.
+- Task-phase boundaries, high-risk decisions, explicit operator requests, and large tool-output spikes may request an earlier checkpoint or handoff. These event triggers can strengthen but never postpone the action selected by token, reserve, turn, freshness, or probe gates.
 - A retry is informative only when its projection, source observation, checkpoint, or evidence set changes. A repeated identical failure fingerprint blocks immediately.
 - Every accepted handoff appends meta-lineage containing root lineage ID, parent transition, source and destination actor IDs, checkpoint, verified projection, and accepted logical time. Resume state is materialized from the canonical ledger, never by recursively summarizing an earlier handoff summary.
 - The plan introduces no daemon, scheduler, watcher, continuous monitor, UI, remote state, cross-machine envelope, or vendor-specific hook.
@@ -125,6 +126,13 @@ class ContextCalibrationStatus(StrEnum):
     CALIBRATED = "calibrated"
 
 
+class ContextBoundarySignal(StrEnum):
+    PHASE_BOUNDARY = "phase_boundary"
+    HIGH_RISK_DECISION = "high_risk_decision"
+    OPERATOR_REQUEST = "operator_request"
+    TOOL_OUTPUT_SPIKE = "tool_output_spike"
+
+
 @dataclass(frozen=True, slots=True)
 class ContextBudgetPolicyV1:
     policy_id: RecordId
@@ -159,6 +167,7 @@ class ContextMetricsV1:
     cumulative_session: ContextTokenUsageV1
     compaction_generation: int
     turns_since_verified_checkpoint: int
+    boundary_signals: tuple[ContextBoundarySignal, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +188,7 @@ def evaluate_context_budget(
 
 - [ ] **Step 1: Write failing canonical policy and metric tests**
 
-Require `0 < checkpoint_at_bps < compact_at_bps < block_at_bps <= 10000`, `0 < checkpoint_ceiling_tokens < compact_ceiling_tokens < block_ceiling_tokens`, a canonical profile-identity digest, positive rendered capacity, rendered `0 <= used_tokens_upper_bound <= capacity`, nonnegative cumulative upper bound, compaction generation, and turn count, registered deterministic producer identity, canonical field order, stable golden bytes, and no unknown fields or floats. `INCOMPLETE` and `UNAVAILABLE` counters require `used_tokens_upper_bound=None`; COMPLETE and ESTIMATED_UPPER_BOUND require an integer. Assert the named seed profile serializes with `calibration_status=provisional_uncalibrated`, 5000/6500/7500 basis points, 80000/120000/160000 cumulative ceilings, 8192 reserve tokens, 120 seconds, 8 turns, depth 8, and 3 attempts. `CALIBRATED` requires an external current calibration evidence record bound to the exact profile identity; configuration alone cannot set it.
+Require `0 < checkpoint_at_bps < compact_at_bps < block_at_bps <= 10000`, `0 < checkpoint_ceiling_tokens < compact_ceiling_tokens < block_ceiling_tokens`, a canonical profile-identity digest, positive rendered capacity, rendered `0 <= used_tokens_upper_bound <= capacity`, nonnegative cumulative upper bound, compaction generation, and turn count, registered deterministic producer identity, canonical field order, stable golden bytes, and no unknown fields or floats. The profile identity digest binds provider, exact model/version, route, harness build, system and compaction prompt digests, usage-source identity, tool-schema-set digest, workload class, and transition mechanism without storing secret values. `INCOMPLETE` and `UNAVAILABLE` counters require `used_tokens_upper_bound=None`; COMPLETE and ESTIMATED_UPPER_BOUND require an integer. Assert the named seed profile serializes with `calibration_status=provisional_uncalibrated`, 5000/6500/7500 basis points, 80000/120000/160000 cumulative ceilings, 8192 output/tool/checkpoint-recovery reserve tokens, 120 seconds, 8 turns, depth 8, and 3 attempts. `CALIBRATED` requires an external current calibration evidence record bound to the exact profile identity; configuration alone cannot set it.
 
 ```python
 def test_context_policy_thresholds_are_strictly_ordered() -> None:
@@ -197,7 +206,7 @@ def test_metrics_reject_used_tokens_above_capacity() -> None:
 
 - [ ] **Step 2: Write the complete budget decision table**
 
-Cover rendered boundaries at 49.99%, 50%, 64.99%, 65%, 74.99%, and 75%; cumulative boundaries at 79,999/80,000, 119,999/120,000, and 159,999/160,000 tokens; conflicting ratio/absolute actions where the stronger action wins; reserve-floor breach; turn-count breach; compaction-generation increment; exact metric expiry; one second beyond expiry; COMPLETE, ESTIMATED_UPPER_BOUND, INCOMPLETE, and UNAVAILABLE values independently for rendered and cumulative counters; zero/malformed capacity; and producer mismatch. `ESTIMATED_UPPER_BOUND` is usable only when its conservative upper bound and deterministic producer are verified. Incomplete, unavailable, expired, or advisory counters emit required UNKNOWN and may not produce CONTINUE under guard.
+Cover rendered boundaries at 49.99%, 50%, 64.99%, 65%, 74.99%, and 75%; cumulative boundaries at 79,999/80,000, 119,999/120,000, and 159,999/160,000 tokens; conflicting ratio/absolute actions where the stronger action wins; reserve-floor breach; turn-count breach; compaction-generation increment; each earlier-boundary signal; exact metric expiry; one second beyond expiry; COMPLETE, ESTIMATED_UPPER_BOUND, INCOMPLETE, and UNAVAILABLE values independently for rendered and cumulative counters; zero/malformed capacity; and producer mismatch. Boundary signals are unique and canonically ordered; phase/tool spikes select at least CHECKPOINT, while high-risk/operator signals select COMPACT_OR_HANDOFF unless a stronger gate applies. `ESTIMATED_UPPER_BOUND` is usable only when its conservative upper bound and deterministic producer are verified. Incomplete, unavailable, expired, or advisory counters emit required UNKNOWN and may not produce CONTINUE under guard.
 
 ```python
 def test_block_boundary_is_inclusive() -> None:
@@ -224,7 +233,7 @@ Expected: collection fails because context models and evaluator do not exist.
 
 - [ ] **Step 4: Implement integer-only budget evaluation**
 
-Compute `rendered_used_bps = rendered_context.used_tokens_upper_bound * 10000 // rendered_context_capacity_tokens`. Evaluate rendered ratio, cumulative absolute ceiling, reserve floor, probe state, and turn cap independently, then select the strongest action using `BLOCK > COMPACT_OR_HANDOFF > CHECKPOINT > CONTINUE`; equal boundaries are inclusive. A higher `compaction_generation` never resets cumulative usage or checkpoint age and requires a verified post-compaction projection. Evaluate freshness only from explicit logical time. Never call a tokenizer, infer capacity from a model name, or treat a provider-reported compaction as continuity proof.
+Compute `rendered_used_bps = rendered_context.used_tokens_upper_bound * 10000 // rendered_context_capacity_tokens`. Evaluate rendered ratio, cumulative absolute ceiling, output/tool/checkpoint-recovery reserve floor, probe state, turn cap, and explicit earlier-boundary signal independently, then select the strongest action using `BLOCK > COMPACT_OR_HANDOFF > CHECKPOINT > CONTINUE`; equal boundaries are inclusive. A higher `compaction_generation` never resets cumulative usage or checkpoint age and requires a verified post-compaction projection. Evaluate freshness only from explicit logical time. Never call a tokenizer, infer capacity from a model name, or treat a provider-reported compaction as continuity proof.
 
 - [ ] **Step 5: Run GREEN and mutation proof**
 
