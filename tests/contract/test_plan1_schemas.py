@@ -8,6 +8,9 @@ import pytest
 from jsonschema import Draft202012Validator, ValidationError
 from referencing import Registry, Resource
 
+from agent_continuity.kernel.canonical import canonical_bytes
+from tools import verify_schemas
+
 SCHEMA_ROOT = Path(__file__).parents[2] / "schemas" / "v1"
 
 
@@ -147,3 +150,89 @@ def test_capture_schemas_accept_strict_golden_records() -> None:
         validator.validate(positive)
         with pytest.raises(ValidationError):
             validator.validate({**positive, "unexpected": True})
+
+
+def _valid_tool_schema(*, schema_id: str, record_type: str) -> dict[str, Any]:
+    return {
+        "$id": schema_id,
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": False,
+        "properties": {"value": {"type": "string"}},
+        "required": ["value"],
+        "type": "object",
+        "x-record-type": record_type,
+    }
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_code"),
+    [
+        ("invalid_schema", "invalid_schema"),
+        ("missing_id", "invalid_schema_metadata"),
+        ("unresolved_ref", "invalid_golden"),
+        ("duplicate_record_type", "registry_mismatch"),
+        ("missing_record_type", "invalid_schema_metadata"),
+        ("malformed_golden", "invalid_golden"),
+        ("unknown_fields", "schema_allows_unknown_fields"),
+    ],
+)
+def test_schema_verifier_normalizes_every_expected_failure_as_canonical_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    scenario: str,
+    expected_code: str,
+) -> None:
+    root = tmp_path / "schemas"
+    root.mkdir()
+    first_name = "example.schema.json"
+    first = _valid_tool_schema(
+        schema_id="https://example.invalid/example.schema.json",
+        record_type="Example/v1",
+    )
+    registry = {"Example/v1": first_name}
+    goldens: dict[str, dict[str, Any]] = {first_name: {"value": "ok"}}
+
+    if scenario == "invalid_schema":
+        first["type"] = "not-a-json-schema-type"
+    elif scenario == "missing_id":
+        del first["$id"]
+    elif scenario == "unresolved_ref":
+        first["properties"] = {
+            "value": {"$ref": "https://example.invalid/missing.schema.json"}
+        }
+    elif scenario == "duplicate_record_type":
+        second_name = "second.schema.json"
+        second = _valid_tool_schema(
+            schema_id="https://example.invalid/second.schema.json",
+            record_type="Example/v1",
+        )
+        (root / second_name).write_text(json.dumps(second), encoding="utf-8")
+        registry["Second/v1"] = second_name
+        goldens[second_name] = {"value": "ok"}
+    elif scenario == "missing_record_type":
+        del first["x-record-type"]
+    elif scenario == "malformed_golden":
+        goldens[first_name] = {"value": 1}
+    elif scenario == "unknown_fields":
+        del first["additionalProperties"]
+    else:  # pragma: no cover - parametrization is closed above
+        raise AssertionError(scenario)
+
+    (root / first_name).write_text(json.dumps(first), encoding="utf-8")
+    monkeypatch.setattr(verify_schemas, "SCHEMA_ROOT", root)
+    monkeypatch.setattr(verify_schemas, "SCHEMA_REGISTRY", registry)
+    monkeypatch.setattr(verify_schemas, "_goldens", lambda: goldens)
+
+    exit_code = verify_schemas.main()
+    captured = capfd.readouterr()
+
+    assert exit_code == 1
+    assert captured.err == ""
+    assert captured.out.encode("utf-8") == canonical_bytes(
+        {
+            "code": expected_code,
+            "schema": "SchemaVerification/v1",
+            "status": "fail",
+        }
+    )

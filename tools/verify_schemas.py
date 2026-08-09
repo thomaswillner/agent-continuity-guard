@@ -18,15 +18,45 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_ROOT = ROOT / "schemas" / "v1"
 
 
+class SchemaVerificationError(ValueError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 def _load() -> dict[str, dict[str, Any]]:
     loaded: dict[str, dict[str, Any]] = {}
     for path in sorted(SCHEMA_ROOT.glob("*.schema.json")):
-        value = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise SchemaVerificationError("invalid_schema_json") from error
         if not isinstance(value, dict):
-            raise ValueError(f"schema is not an object: {path.name}")
-        Draft202012Validator.check_schema(value)
+            raise SchemaVerificationError("invalid_schema")
+        if type(value.get("$id")) is not str or type(
+            value.get("x-record-type")
+        ) is not str:
+            raise SchemaVerificationError("invalid_schema_metadata")
+        try:
+            Draft202012Validator.check_schema(value)
+        except Exception as error:
+            raise SchemaVerificationError("invalid_schema") from error
         loaded[path.name] = value
     return loaded
+
+
+def _registered_schemas(schemas: dict[str, dict[str, Any]]) -> dict[str, str]:
+    registered: dict[str, str] = {}
+    for name, schema in schemas.items():
+        record_type = schema["x-record-type"]
+        if not isinstance(record_type, str):
+            raise SchemaVerificationError("invalid_schema_metadata")
+        if record_type in registered:
+            raise SchemaVerificationError("registry_mismatch")
+        registered[record_type] = name
+    if registered != SCHEMA_REGISTRY:
+        raise SchemaVerificationError("registry_mismatch")
+    return registered
 
 
 def _goldens() -> dict[str, dict[str, Any]]:
@@ -101,36 +131,51 @@ def _goldens() -> dict[str, dict[str, Any]]:
 def main() -> int:
     try:
         schemas = _load()
-        registered = {
-            schema.get("x-record-type"): name for name, schema in schemas.items()
-        }
-        if registered != SCHEMA_REGISTRY:
-            raise ValueError("schema registry does not match public schema identifiers")
-        registry: Registry[Any] = Registry().with_resources(
-            [
-                (schema["$id"], Resource.from_contents(schema))
-                for schema in schemas.values()
-            ]
-        )
+        _registered_schemas(schemas)
+        try:
+            registry: Registry[Any] = Registry().with_resources(
+                [
+                    (schema["$id"], Resource.from_contents(schema))
+                    for schema in schemas.values()
+                ]
+            )
+        except Exception as error:
+            raise SchemaVerificationError("invalid_schema_metadata") from error
         goldens = _goldens()
         if set(goldens) != set(schemas):
-            raise ValueError("schema golden coverage is incomplete")
+            raise SchemaVerificationError("golden_coverage_mismatch")
         for name, positive in goldens.items():
             validator = Draft202012Validator(schemas[name], registry=registry)
-            validator.validate(positive)
+            try:
+                validator.validate(positive)
+            except Exception as error:
+                raise SchemaVerificationError("invalid_golden") from error
             try:
                 validator.validate({**positive, "unexpected": True})
             except ValidationError:
                 pass
+            except Exception as error:
+                raise SchemaVerificationError("invalid_golden") from error
             else:
-                raise ValueError(f"schema accepts unknown top-level fields: {name}")
-    except (OSError, ValueError, ValidationError, json.JSONDecodeError) as error:
+                raise SchemaVerificationError("schema_allows_unknown_fields")
+    except SchemaVerificationError as error:
         sys.stdout.buffer.write(
             canonical_bytes(
                 {
+                    "code": error.code,
                     "schema": "SchemaVerification/v1",
                     "status": "fail",
-                    "error_type": type(error).__name__,
+                }
+            )
+        )
+        return 1
+    except Exception:
+        sys.stdout.buffer.write(
+            canonical_bytes(
+                {
+                    "code": "internal_verification_error",
+                    "schema": "SchemaVerification/v1",
+                    "status": "fail",
                 }
             )
         )

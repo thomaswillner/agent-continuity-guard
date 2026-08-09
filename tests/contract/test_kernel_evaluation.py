@@ -4,9 +4,10 @@ from itertools import permutations
 
 import pytest
 
-from agent_continuity.kernel.canonical import canonical_bytes
+from agent_continuity.kernel.canonical import CanonicalJSONError, canonical_bytes
 from agent_continuity.kernel.evaluation import (
     EvaluationCase,
+    EvaluationResult,
     Profile,
     Verdict,
     evaluate,
@@ -21,13 +22,15 @@ def finding(
     *,
     code: str = "example",
     integrity_failure: bool = False,
+    message_id: str = "acg.example",
+    parameters: dict[str, object] | None = None,
 ) -> Finding:
     return Finding(
         code=code,
         verdict=verdict,
         subject_id=RecordId("sha256:" + "1" * 64),
-        message_id="acg.example",
-        parameters={},
+        message_id=message_id,
+        parameters={} if parameters is None else parameters,  # type: ignore[arg-type]
         integrity_failure=integrity_failure,
     )
 
@@ -111,3 +114,71 @@ def test_highest_ranked_finding_controls_verdict() -> None:
         Verdict.UNKNOWN,
         Verdict.BLOCK,
     ]
+
+
+def test_total_finding_sort_is_invariant_when_primary_fields_tie() -> None:
+    tied = (
+        finding(
+            Verdict.WARN,
+            message_id="acg.example.zeta",
+            parameters={"value": 2},
+        ),
+        finding(
+            Verdict.WARN,
+            message_id="acg.example.alpha",
+            parameters={"value": 2},
+        ),
+        finding(
+            Verdict.WARN,
+            message_id="acg.example.alpha",
+            parameters={"value": 1},
+            integrity_failure=True,
+        ),
+    )
+    expected: bytes | None = None
+    for ordered in permutations(tied):
+        result = evaluate(EvaluationCase(Profile.OBSERVE, ordered))
+        encoded = canonical_bytes(evaluation_result_payload(result))
+        if expected is None:
+            expected = encoded
+        assert encoded == expected
+
+
+def test_finding_defensively_freezes_nested_parameters() -> None:
+    original: dict[str, object] = {
+        "outer": {"items": ["first"]},
+        "top": "original",
+    }
+    value = finding(Verdict.WARN, parameters=original)
+    before = canonical_bytes(evaluation_result_payload(evaluate(
+        EvaluationCase(Profile.GUARD, (value,))
+    )))
+
+    original["top"] = "mutated"
+    nested_original = original["outer"]
+    assert isinstance(nested_original, dict)
+    nested_original["items"] = ["changed"]
+    exposed = value.parameters
+    exposed["top"] = "mutated-copy"
+    nested_exposed = exposed["outer"]
+    assert isinstance(nested_exposed, dict)
+    nested_exposed["items"] = ["changed-copy"]
+
+    after = canonical_bytes(evaluation_result_payload(evaluate(
+        EvaluationCase(Profile.GUARD, (value,))
+    )))
+    assert after == before
+    assert value.parameters == {
+        "outer": {"items": ["first"]},
+        "top": "original",
+    }
+
+
+def test_evaluation_frozen_records_reject_mutable_or_untyped_containers() -> None:
+    value = finding(Verdict.WARN)
+    with pytest.raises(CanonicalJSONError):
+        EvaluationCase(Profile.GUARD, [value])  # type: ignore[arg-type]
+    with pytest.raises(CanonicalJSONError):
+        EvaluationCase("guard", (value,))  # type: ignore[arg-type]
+    with pytest.raises(CanonicalJSONError):
+        EvaluationResult(Verdict.WARN, True, [value])  # type: ignore[arg-type]

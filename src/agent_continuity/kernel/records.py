@@ -53,10 +53,16 @@ class FactV1:
     value: JsonScalar
 
     def __post_init__(self) -> None:
+        if type(self.field_path) is not tuple or any(
+            type(item) is not str for item in self.field_path
+        ):
+            raise CanonicalJSONError("fact field path must be an exact string tuple")
         if not 1 <= len(self.field_path) <= 8:
             raise CanonicalJSONError("fact field path must have one to eight segments")
         if any(_FIELD_COMPONENT_RE.fullmatch(item) is None for item in self.field_path):
             raise CanonicalJSONError("fact field path contains an invalid segment")
+        if self.value is not None and type(self.value) not in {bool, int, str}:
+            raise CanonicalJSONError("fact value must be an exact JSON scalar")
         canonical_bytes(self.value)
 
 

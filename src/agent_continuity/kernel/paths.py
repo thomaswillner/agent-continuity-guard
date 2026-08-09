@@ -59,24 +59,51 @@ def _windows_segment_offsets(raw: bytes) -> tuple[int, ...]:
         raise CanonicalJSONError("Windows path must be relative and NUL-free")
     if len(text) >= 2 and text[1] == ":":
         raise CanonicalJSONError("drive-qualified Windows paths are forbidden")
-    segments: list[tuple[int, str]] = []
+    segments: list[tuple[int, bytes]] = []
     start = 0
-    for index, character in enumerate(text):
-        if character in {"\\", "/"}:
-            segments.append((start, text[start:index]))
-            start = index + 1
-    segments.append((start, text[start:]))
+    for index in range(0, len(raw), 2):
+        code_unit = raw[index : index + 2]
+        if code_unit in {b"\\\x00", b"/\x00"}:
+            segments.append((start, raw[start:index]))
+            start = index + 2
+    segments.append((start, raw[start:]))
     if any(not segment for _, segment in segments):
         raise CanonicalJSONError("path contains an empty segment")
-    if any(segment == ".." for _, segment in segments):
+    if any(segment == b".\x00.\x00" for _, segment in segments):
         raise CanonicalJSONError("path contains a parent traversal segment")
-    return tuple(index * 2 for index, _ in segments)
+    return tuple(index for index, _ in segments)
 
 
 def _segment_offsets(encoding: PathEncoding, raw: bytes) -> tuple[int, ...]:
     if encoding == "windows-utf16le":
         return _windows_segment_offsets(raw)
     return _posix_segment_offsets(raw)
+
+
+def _trusted_case_key(encoding: PathEncoding, raw: bytes) -> bytes:
+    """Derive the sole CaseKey/v1 normalization admitted by the kernel."""
+
+    if encoding == "windows-utf16le":
+        try:
+            return raw.decode("utf-16le", errors="strict").casefold().encode("utf-16le")
+        except UnicodeError as error:
+            raise CanonicalJSONError("Windows case key source is invalid") from error
+    uppercase = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    lowercase = b"abcdefghijklmnopqrstuvwxyz"
+    return raw.translate(bytes.maketrans(uppercase, lowercase))
+
+
+def _path_components(encoding: PathEncoding, raw: bytes) -> tuple[bytes, ...]:
+    if encoding != "windows-utf16le":
+        return tuple(raw.split(b"/"))
+    components: list[bytes] = []
+    start = 0
+    for index in range(0, len(raw), 2):
+        if raw[index : index + 2] in {b"\\\x00", b"/\x00"}:
+            components.append(raw[start:index])
+            start = index + 2
+    components.append(raw[start:])
+    return tuple(components)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,14 +116,28 @@ class PathIdentityV1:
     case_key_b64: str | None
 
     def __post_init__(self) -> None:
+        if type(self.encoding) is not str:
+            raise CanonicalJSONError("path encoding must be a plain string")
         if self.encoding not in _PATH_ENCODINGS:
             raise CanonicalJSONError("unsupported path encoding")
+        if type(self.raw_b64) is not str:
+            raise CanonicalJSONError("path byte encoding must be a plain string")
+        if type(self.segment_offsets) is not tuple or any(
+            type(item) is not int for item in self.segment_offsets
+        ):
+            raise CanonicalJSONError("path offsets must be an immutable integer tuple")
         raw = _b64decode(self.raw_b64)
         expected_offsets = _segment_offsets(self.encoding, raw)
         if self.segment_offsets != expected_offsets:
             raise CanonicalJSONError("path segment offsets do not match raw bytes")
         if self.case_key_b64 is not None:
-            _b64decode(self.case_key_b64)
+            if type(self.case_key_b64) is not str:
+                raise CanonicalJSONError("case key must be a plain string")
+            case_key = _b64decode(self.case_key_b64)
+            if case_key != _trusted_case_key(self.encoding, raw):
+                raise CanonicalJSONError(
+                    "case key is not a trusted CaseKey/v1 derivation"
+                )
 
     @classmethod
     def from_bytes(
@@ -106,6 +147,9 @@ class PathIdentityV1:
         *,
         case_key: bytes | None = None,
     ) -> PathIdentityV1:
+        invalid_case_key = case_key is not None and type(case_key) is not bytes
+        if type(raw) is not bytes or invalid_case_key:
+            raise CanonicalJSONError("path and case key inputs must be exact bytes")
         offsets = _segment_offsets(encoding, raw)
         return cls(
             encoding=encoding,
@@ -157,22 +201,33 @@ class PathScopeV1:
     kind: PathScopeKind
 
     def __post_init__(self) -> None:
+        if type(self.kind) is not PathScopeKind:
+            raise CanonicalJSONError("path scope kind must be a PathScopeKind")
+        if self.path is not None and type(self.path) is not PathIdentityV1:
+            raise CanonicalJSONError("path scope path must be a PathIdentityV1")
         if self.path is None and self.kind is not PathScopeKind.TREE:
             raise CanonicalJSONError("only a TREE scope may denote target root")
 
     def contains(self, candidate: PathIdentityV1) -> bool:
         if self.path is None:
             return True
+        if type(candidate) is not PathIdentityV1:
+            return False
         if self.path.encoding != candidate.encoding:
             return False
-        scope_raw = self.path.case_key_bytes() or self.path.raw_bytes()
-        candidate_raw = candidate.case_key_bytes() or candidate.raw_bytes()
+        scope_case_key = self.path.case_key_bytes()
+        candidate_case_key = candidate.case_key_bytes()
+        if (scope_case_key is None) != (candidate_case_key is None):
+            return False
+        scope_raw = self.path.raw_bytes() if scope_case_key is None else scope_case_key
+        candidate_raw = (
+            candidate.raw_bytes() if candidate_case_key is None else candidate_case_key
+        )
+        scope_components = _path_components(self.path.encoding, scope_raw)
+        candidate_components = _path_components(candidate.encoding, candidate_raw)
         if self.kind is PathScopeKind.FILE:
-            return candidate_raw == scope_raw
-        if candidate_raw == scope_raw:
-            return True
-        separator = b"\\\x00" if self.path.encoding == "windows-utf16le" else b"/"
-        return candidate_raw.startswith(scope_raw + separator)
+            return candidate_components == scope_components
+        return candidate_components[: len(scope_components)] == scope_components
 
 
 def detect_case_collisions(paths: tuple[PathIdentityV1, ...]) -> None:
@@ -209,3 +264,11 @@ def parse_path_encoding(value: str) -> PathEncoding:
         raise CanonicalJSONError("unsupported path encoding")
     return cast(PathEncoding, value)
 
+
+def parse_path_scope_kind(value: str) -> PathScopeKind:
+    if type(value) is not str:
+        raise CanonicalJSONError("path scope kind must be a plain string")
+    try:
+        return PathScopeKind(value)
+    except ValueError as error:
+        raise CanonicalJSONError("unsupported path scope kind") from error

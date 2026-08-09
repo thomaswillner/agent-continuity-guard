@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from .canonical import CanonicalJSONError, canonical_bytes
 from .model import JsonObject
 
 if TYPE_CHECKING:
@@ -38,6 +39,16 @@ class EvaluationCase:
     profile: Profile
     findings: tuple[Finding, ...]
 
+    def __post_init__(self) -> None:
+        from .findings import Finding
+
+        if type(self.profile) is not Profile:
+            raise CanonicalJSONError("evaluation profile is invalid")
+        if type(self.findings) is not tuple or any(
+            type(item) is not Finding for item in self.findings
+        ):
+            raise CanonicalJSONError("evaluation findings must be an immutable tuple")
+
 
 @dataclass(frozen=True, slots=True)
 class EvaluationResult:
@@ -45,15 +56,28 @@ class EvaluationResult:
     transition_allowed: bool
     findings: tuple[Finding, ...]
 
+    def __post_init__(self) -> None:
+        from .findings import Finding
+
+        if type(self.verdict) is not Verdict:
+            raise CanonicalJSONError("evaluation verdict is invalid")
+        if type(self.transition_allowed) is not bool:
+            raise CanonicalJSONError("transition_allowed must be Boolean")
+        if type(self.findings) is not tuple or any(
+            type(item) is not Finding for item in self.findings
+        ):
+            raise CanonicalJSONError("evaluation findings must be an immutable tuple")
+
 
 def evaluate(case: EvaluationCase) -> EvaluationResult:
+    from .findings import finding_payload
+
     findings = tuple(
         sorted(
             case.findings,
             key=lambda item: (
                 VERDICT_RANK[item.verdict],
-                item.code,
-                str(item.subject_id),
+                canonical_bytes(finding_payload(item)),
             ),
         )
     )
