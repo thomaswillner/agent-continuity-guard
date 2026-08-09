@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator, ValidationError
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from referencing import Registry, Resource
 
-from agent_continuity.kernel.canonical import canonical_bytes
+from agent_continuity.kernel.canonical import canonical_bytes, validate_logical_time
 from agent_continuity.kernel.records import SCHEMA_REGISTRY
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +22,22 @@ class SchemaVerificationError(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def schema_format_checker() -> FormatChecker:
+    checker = FormatChecker()
+
+    @checker.checks("date-time")
+    def canonical_logical_time(value: object) -> bool:
+        if type(value) is not str:
+            return False
+        try:
+            validate_logical_time(value)
+        except ValueError:
+            return False
+        return True
+
+    return checker
 
 
 def _load() -> dict[str, dict[str, Any]]:
@@ -196,7 +212,11 @@ def main() -> int:
         if set(goldens) != set(schemas):
             raise SchemaVerificationError("golden_coverage_mismatch")
         for name, positive in goldens.items():
-            validator = Draft202012Validator(schemas[name], registry=registry)
+            validator = Draft202012Validator(
+                schemas[name],
+                registry=registry,
+                format_checker=schema_format_checker(),
+            )
             try:
                 validator.validate(positive)
                 _semantic_validate(name, positive)

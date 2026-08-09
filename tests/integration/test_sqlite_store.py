@@ -413,6 +413,71 @@ def test_after_commit_fault_reconciles_and_exact_retry_is_idempotent(
     assert _table_count(path, "audit_events") == 1
 
 
+def test_exact_retry_survives_unrelated_later_audit_event(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    first = _record("first")
+    second = _record("second")
+    first_event = _event(first.record_id)
+    first_update = HeadUpdate("head:a", None, first.record_id)
+
+    with _open_store(path) as store:
+        original = store.commit_many(
+            records=(first,),
+            event=first_event,
+            head_updates=(first_update,),
+        )
+        store.commit_many(
+            records=(second,),
+            event=_event(second.record_id),
+            head_updates=(HeadUpdate("head:b", None, second.record_id),),
+        )
+
+        retried = store.commit_many(
+            records=(first,),
+            event=first_event,
+            head_updates=(first_update,),
+        )
+
+        assert retried == original
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_sequence == 2  # type: ignore[union-attr]
+
+
+def test_sensitive_local_values_are_genesis_only(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    first = _record("first")
+    second = _record("second")
+    late_local = SensitiveLocalValueDraft(
+        digest=digest_bytes(b"late goal"),
+        kind="goal_text",
+        value=b"late goal",
+        caller_approved=True,
+    )
+
+    with _open_store(path) as store:
+        genesis = store.commit(
+            records=(first,),
+            event=_event(first.record_id),
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=first.record_id,
+        )
+        with pytest.raises(StoreValidationError):
+            store.commit(
+                records=(second,),
+                local_values=(late_local,),
+                event=_event(second.record_id),
+                head_name="checkpoint",
+                expected_head=genesis.head,
+                new_head_id=second.record_id,
+            )
+        assert store.read_head("checkpoint") == genesis.head
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_sequence == 1  # type: ignore[union-attr]
+
+    assert _table_count(path, "sensitive_local_values") == 0
+
+
 def test_store_reopen_rehashes_records_and_rejects_schema_drift(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite3"
     record = _record("reopen")

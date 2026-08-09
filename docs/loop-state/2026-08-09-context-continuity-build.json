@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 20,
+  "revision": 22,
   "contract": {
     "revision": 1,
     "goal": {
@@ -78,7 +78,9 @@
       "Task 3 systemic boundary-validator commit 626e268 passed 215 focused and 299 full tests, nine-schema verification, strict mypy over 15 source files, Ruff, diff, DCO, scoped secret, and isolated-archive gates. Independent review reproduced no additional behavior defect but remained FAIL because the architecture gate omitted tests/contract/test_plan1_schemas.py, where three private seams bypassed the enumerated public-test boundary. Review evidence sha256:9a56b03e88a5ba57dcf348790fd4cde995fc22187b78799f85d9060aef226aae.",
       "Task 3 architecture-inventory repair produced the expected RED with exactly three omitted private-boundary violations, then GREEN with 17 contract tests and 299 full tests. Nine-schema verification, strict mypy over 15 source files, Ruff, diff, and scoped secret gates pass; immutable independent re-review remains pending.",
       "Task 3 immutable architecture-repair re-review passed with zero violations across the complete four-file test inventory, reconstructed base RED of exactly three, 17 contract tests, 230 focused tests, 299 full tests, nine schemas, strict mypy over 15 source files, Ruff, DCO, diff, scoped secret, and isolated-import gates. Canonical checker evidence manifest sha256:deb37dd4243de073d446f17a09ca704002a978d5b18658dfb673dddb8c65317b; persisted report sha256:fb3c759e0265fe113273c6097c0dff4552a2ecc1bfb5293f7a7c5dc4b27f3ed5.",
-      "Plan 1 Task 4 maker implementation adds schema-v1 SQLite and memory StateStores, immutable records and local values, multi-head CAS, linked audit replay, anchors, tamper and truncation detection, five fault labels, and post-commit reconciliation. Genuine RED covered missing modules plus two later commit-boundary defects; GREEN passes 29 focused and 328 full tests, 12 schemas, 15 schema contracts, strict mypy over 19 source files, Ruff, diff, and temporary-store durability probes. Maker report sha256:1f58c0a032cecef8bbd1f8810c1711f3bcbf2cd865e9ca1a89aca34d31b98209; immutable independent review remains pending."
+      "Plan 1 Task 4 maker implementation adds schema-v1 SQLite and memory StateStores, immutable records and local values, multi-head CAS, linked audit replay, anchors, tamper and truncation detection, five fault labels, and post-commit reconciliation. Genuine RED covered missing modules plus two later commit-boundary defects; GREEN passes 29 focused and 328 full tests, 12 schemas, 15 schema contracts, strict mypy over 19 source files, Ruff, diff, and temporary-store durability probes. Maker report sha256:1f58c0a032cecef8bbd1f8810c1711f3bcbf2cd865e9ca1a89aca34d31b98209; immutable independent review remains pending.",
+      "Task 4 independent review remained FAIL despite 29 focused and 328 full passing tests. It found four blockers: local narrative rows are not genesis-only, exact retry fails after an unrelated later event, replay permits an event to reference a record declared inserted only by a future event, and audit-event schema accepts impossible calendar dates rejected by runtime. Review report sha256:46a1d4d2bc302f64c9b03aeab12737ed701bf6317dfdd5e37f1499ba4476a48e; review interruption left secret, repro execution, sealing, cleanup, and final identity gates incomplete.",
+      "Task 4 fix round 1 reproduced five RED cases across the four blocker contracts, including both audit time schemas. GREEN passes all five plus 49 focused Task 4/schema tests, 12-schema verification, strict mypy over 19 source files, Ruff, and diff gates. Fix report sha256:abcfc61621a80375584b2d8387a26de425e389dce50508ef0c469cbbdf36d7ec; full maker and independent gates remain pending."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -92,7 +94,8 @@
       "Reclassified the remaining Task 3 failure as one architecture-inventory cluster: the public-boundary AST gate must cover Task 3 contract, integration, and security tests and reject every private production seam exposed by that complete inventory.",
       "Expanded the Task 3 architecture inventory to its own gate plus the Plan 1 schema contract, integration, and security tests; migrated capture imports to the public package and renamed the schema verifier golden factory to the public schema_goldens seam.",
       "Closed Plan 1 Task 3 only after immutable independent review reproduced RED, GREEN, complete test inventory, source boundary, and secret-safe artifact evidence.",
-      "Added a transaction-bound audit event that binds requested and newly inserted record IDs, approved local digest/kind identities, expected and resulting heads, store identity, sequence, predecessor, subject, logical time, and defensively copied canonical details without sensitive-local bytes."
+      "Added a transaction-bound audit event that binds requested and newly inserted record IDs, approved local digest/kind identities, expected and resulting heads, store identity, sequence, predecessor, subject, logical time, and defensively copied canonical details without sensitive-local bytes.",
+      "Hardened Task 4 with genesis-only local-value admission after retry recognition, historical exact-retry lookup bound to still-current result heads, prefix-causal record replay, and an explicit canonical date-time schema checker that does not depend on optional jsonschema extras."
     ]
   },
   "gates": [
@@ -143,16 +146,16 @@
       "implementation_plan_tasks": 38
     },
     "used": {
-      "retries_per_failure_fingerprint": 0,
+      "retries_per_failure_fingerprint": 1,
       "implementation_plan_tasks": 4
     }
   },
   "failure_fingerprint": {
-    "gate": "",
-    "symptom": "",
-    "evidence_signature": "",
-    "hypothesis": ""
+    "gate": "plan1.task4.independent_review",
+    "symptom": "StateStore accepts goal and criterion local values after genesis, exact retries depend on audit-latest position, audit replay does not enforce record insertion causality, and audit-event schema logical-time validation is weaker than runtime.",
+    "evidence_signature": "sha256:46a1d4d2bc302f64c9b03aeab12737ed701bf6317dfdd5e37f1499ba4476a48e",
+    "hypothesis": "Genesis-state admission for local values, historical exact-transaction retry lookup bound to current result heads, prefix-causal audit replay, and a semantic logical-time schema keyword close all four defects without weakening immutable transaction identity."
   },
-  "next_action": "Commit Plan 1 Task 4 under exact-path gates and obtain immutable independent review before Task 5.",
+  "next_action": "Run full Task 4 fix gates, commit exact repair paths, and repeat complete immutable independent review before Task 5.",
   "verdict": "IN_PROGRESS"
 }

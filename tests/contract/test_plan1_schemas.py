@@ -168,6 +168,32 @@ def test_capture_schemas_accept_strict_golden_records() -> None:
             validator.validate({**positive, "unexpected": True})
 
 
+@pytest.mark.parametrize(
+    ("schema_name", "field_name"),
+    [
+        ("audit-anchor.schema.json", "created_at"),
+        ("audit-event.schema.json", "logical_time"),
+    ],
+)
+def test_audit_time_schemas_reject_impossible_calendar_dates(
+    schema_name: str,
+    field_name: str,
+) -> None:
+    schemas = _schemas()
+    validator = Draft202012Validator(
+        schemas[schema_name],
+        registry=_registry(schemas),
+        format_checker=verify_schemas.schema_format_checker(),
+    )
+    invalid = {
+        **verify_schemas.schema_goldens()[schema_name],
+        field_name: "2026-99-99T12:00:00Z",
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(invalid)
+
+
 def test_capture_goldens_have_complete_independent_tool_parity() -> None:
     tool_goldens = verify_schemas.schema_goldens()
     capture_goldens = _capture_schema_goldens()

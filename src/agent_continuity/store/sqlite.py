@@ -404,36 +404,37 @@ class SQLiteStateStore:
         signature: JsonObject,
         head_updates: tuple[HeadUpdate, ...],
     ) -> MultiHeadCommitReceipt | None:
-        row = connection.execute(
+        rows = connection.execute(
             "SELECT sequence, event_id, canonical_bytes FROM audit_events "
-            "ORDER BY sequence DESC LIMIT 1"
-        ).fetchone()
-        if row is None:
-            return None
-        try:
-            sequence = cast(int, row[0])
-            event_id_value = RecordId(cast(str, row[1]))
-            payload = canonical_loads(bytes(row[2]))
-            if self._event_signature(payload) != signature:
-                return None
-            inserted_raw = payload["inserted_record_ids"]
-            if type(inserted_raw) is not list:
-                raise StoreIntegrityError("stored retry record IDs are invalid")
-            inserted = tuple(RecordId(cast(str, item)) for item in inserted_raw)
-            heads: list[tuple[str, HeadState]] = []
-            for update in head_updates:
-                current = self._read_head(connection, update.name)
-                expected_current = HeadState(
-                    record_id=update.new_record_id,
-                    audit_event_id=event_id_value,
-                    audit_sequence=sequence,
-                )
-                if current != expected_current:
-                    return None
-                heads.append((update.name, expected_current))
-            return MultiHeadCommitReceipt(tuple(heads), inserted)
-        except (KeyError, TypeError, ValueError) as error:
-            raise StoreIntegrityError("stored retry event is invalid") from error
+            "ORDER BY sequence DESC"
+        ).fetchall()
+        for row in rows:
+            try:
+                sequence = cast(int, row[0])
+                event_id_value = RecordId(cast(str, row[1]))
+                payload = canonical_loads(bytes(row[2]))
+                if self._event_signature(payload) != signature:
+                    continue
+                inserted_raw = payload["inserted_record_ids"]
+                if type(inserted_raw) is not list:
+                    raise StoreIntegrityError("stored retry record IDs are invalid")
+                inserted = tuple(RecordId(cast(str, item)) for item in inserted_raw)
+                heads: list[tuple[str, HeadState]] = []
+                for update in head_updates:
+                    current = self._read_head(connection, update.name)
+                    expected_current = HeadState(
+                        record_id=update.new_record_id,
+                        audit_event_id=event_id_value,
+                        audit_sequence=sequence,
+                    )
+                    if current != expected_current:
+                        break
+                    heads.append((update.name, expected_current))
+                else:
+                    return MultiHeadCommitReceipt(tuple(heads), inserted)
+            except (KeyError, TypeError, ValueError) as error:
+                raise StoreIntegrityError("stored retry event is invalid") from error
+        return None
 
     @staticmethod
     def _insert_records(
@@ -571,6 +572,10 @@ class SQLiteStateStore:
             if retry is not None:
                 self._connection.execute("ROLLBACK")
                 return retry
+            if normalized_local_values and self._read_audit_head(self._connection):
+                raise StoreValidationError(
+                    "sensitive-local values are allowed only during genesis"
+                )
             for update in normalized_updates:
                 if self._read_head(self._connection, update.name) != update.expected:
                     raise StoreConflictError(
@@ -772,10 +777,6 @@ class SQLiteStateStore:
                     or payload["store_id"] != self.store_id
                 ):
                     raise StoreIntegrityError("audit event chain metadata is invalid")
-                subject = RecordId(cast(str, payload["subject_id"]))
-                require_digest(subject)
-                if subject not in records:
-                    raise StoreIntegrityError("audit subject record is absent")
                 validate_logical_time(cast(str, payload["logical_time"]))
                 require_public_component(
                     cast(str, payload["kind"]), field="audit event kind"
@@ -788,8 +789,17 @@ class SQLiteStateStore:
                     raise StoreIntegrityError("inserted record IDs are not requested")
                 if inserted_records.intersection(inserted_ids):
                     raise StoreIntegrityError("record is inserted by multiple events")
-                if any(item not in records for item in record_ids):
-                    raise StoreIntegrityError("audit event references absent record")
+                event_available_records = inserted_records | set(inserted_ids)
+                if not set(record_ids).issubset(event_available_records):
+                    raise StoreIntegrityError(
+                        "audit event references a record before insertion"
+                    )
+                subject = RecordId(cast(str, payload["subject_id"]))
+                require_digest(subject)
+                if subject not in event_available_records:
+                    raise StoreIntegrityError(
+                        "audit subject record is unavailable at event prefix"
+                    )
                 inserted_records.update(inserted_ids)
                 local_values = payload["local_values"]
                 if type(local_values) is not list:
@@ -831,8 +841,10 @@ class SQLiteStateStore:
                         raise StoreIntegrityError("audit head CAS history is invalid")
                     new_record_id = RecordId(cast(str, item_object["new_record_id"]))
                     require_record_id(new_record_id, field="audit new record ID")
-                    if new_record_id not in records:
-                        raise StoreIntegrityError("audit head record is absent")
+                    if new_record_id not in event_available_records:
+                        raise StoreIntegrityError(
+                            "audit head record is unavailable at event prefix"
+                        )
                     replayed_heads[name] = HeadState(
                         new_record_id, event_id_value, sequence
                     )

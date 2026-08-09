@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from agent_continuity.kernel.audit import AuditAnchorV1
-from agent_continuity.kernel.canonical import validate_logical_time
+from agent_continuity.kernel.canonical import (
+    canonical_bytes,
+    canonical_loads,
+    record_id,
+    validate_logical_time,
+)
 from agent_continuity.kernel.model import RecordId, StoredRecord
 from agent_continuity.kernel.records import make_record
 from agent_continuity.store.base import AuditEventDraft, StoreIntegrityError
@@ -164,6 +169,79 @@ def test_anchor_detects_history_truncation_after_known_head(tmp_path: Path) -> N
         verification = store.verify_audit(anchor)
     assert verification.valid is False
     assert verification.supplied_anchor_matched is False
+
+
+def test_audit_replay_rejects_future_record_reference(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    first = _record("first")
+    second = _record("second")
+    with _store(path) as store:
+        first_receipt = store.commit(
+            records=(first,),
+            event=_event(first),
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=first.record_id,
+        )
+        store.commit(
+            records=(second,),
+            event=_event(second),
+            head_name="checkpoint",
+            expected_head=first_receipt.head,
+            new_head_id=second.record_id,
+        )
+
+    with sqlite3.connect(path) as connection:
+        _drop_immutable_triggers(connection, "audit_events")
+        rows = connection.execute(
+            "SELECT sequence, canonical_bytes FROM audit_events ORDER BY sequence"
+        ).fetchall()
+        assert len(rows) == 2
+        first_payload = canonical_loads(bytes(rows[0][1]))
+        second_payload = canonical_loads(bytes(rows[1][1]))
+
+        first_payload["record_ids"] = sorted(
+            [first.record_id, second.record_id]
+        )
+        first_updates = first_payload["head_updates"]
+        assert isinstance(first_updates, list)
+        assert isinstance(first_updates[0], dict)
+        first_updates[0]["new_record_id"] = second.record_id
+        first_event_id = record_id("AuditEvent/v1", "v1", first_payload)
+
+        second_payload["previous_event_id"] = first_event_id
+        second_updates = second_payload["head_updates"]
+        assert isinstance(second_updates, list)
+        assert isinstance(second_updates[0], dict)
+        second_updates[0]["expected"] = {
+            "audit_event_id": first_event_id,
+            "audit_sequence": 1,
+            "record_id": second.record_id,
+        }
+        second_event_id = record_id("AuditEvent/v1", "v1", second_payload)
+
+        connection.execute(
+            "UPDATE audit_events SET event_id = ?, canonical_bytes = ? "
+            "WHERE sequence = 1",
+            (first_event_id, canonical_bytes(first_payload)),
+        )
+        connection.execute(
+            "UPDATE audit_events SET event_id = ?, previous_event_id = ?, "
+            "canonical_bytes = ? WHERE sequence = 2",
+            (
+                second_event_id,
+                first_event_id,
+                canonical_bytes(second_payload),
+            ),
+        )
+        connection.execute(
+            "UPDATE heads SET record_id = ?, audit_event_id = ?, "
+            "audit_sequence = 2 WHERE name = 'checkpoint'",
+            (second.record_id, second_event_id),
+        )
+
+    with _store(path) as store:
+        assert store.verify_audit().valid is False
 
 
 def test_foreign_or_rewritten_anchor_fails_closed(tmp_path: Path) -> None:
