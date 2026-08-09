@@ -69,18 +69,6 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         is None
     ):
         raise SchemaVerificationError("invalid_golden")
-    if name == "target-identity.schema.json":
-        capabilities = instance.get("capabilities")
-        if not isinstance(capabilities, list):
-            raise SchemaVerificationError("invalid_golden")
-        names = [
-            item.get("name") if isinstance(item, dict) else None
-            for item in capabilities
-        ]
-        if any(type(item) is not str for item in names):
-            raise SchemaVerificationError("invalid_golden")
-        if names != sorted(names) or len(set(names)) != len(names):
-            raise SchemaVerificationError("invalid_golden")
 
 
 def _goldens() -> dict[str, dict[str, Any]]:
@@ -90,6 +78,12 @@ def _goldens() -> dict[str, dict[str, Any]]:
         "adapter_version": "1",
         "evidence_digest": digest,
         "name": "git_immutable_objects",
+        "status": "proven",
+    }
+    target_capability = {
+        "adapter_id": "acg-git",
+        "adapter_version": "1",
+        "evidence_digest": digest,
         "status": "proven",
     }
     path = {
@@ -135,7 +129,7 @@ def _goldens() -> dict[str, dict[str, Any]]:
         "target-identity.schema.json": {
             "adapter_id": "acg-git",
             "adapter_version": "1",
-            "capabilities": [capability],
+            "capabilities": {"git_immutable_objects": target_capability},
             "filesystem_id": "posix:darwin",
             "git_object_manifest_digest": digest,
             "head_oid": "a" * 40,

@@ -41,6 +41,13 @@ _OID_RE = re.compile(rb"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _SCP_REMOTE_RE = re.compile(
     r"^git@(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(?P<path>[^\s?#]+)$"
 )
+_DESCRIPTOR_GIT_BOOTSTRAP: Final = (
+    "import os,sys;"
+    "descriptor=int(sys.argv[1]);"
+    "os.fchdir(descriptor);"
+    "os.close(descriptor);"
+    "os.execvp('git',['git',*sys.argv[2:]])"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +77,7 @@ def _run_bounded(
     timeout: float,
     max_output: int,
     input_data: bytes | None = None,
+    pass_fds: Sequence[int] = (),
 ) -> _BoundedResult:
     """Run argv while retaining at most max_output bytes per output channel."""
 
@@ -85,6 +93,7 @@ def _run_bounded(
             stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            pass_fds=tuple(pass_fds),
         )
     except OSError as error:
         raise CaptureUnknownError("bounded subprocess could not start") from error
@@ -203,18 +212,13 @@ class GitTargetAdapter:
         if not requested.is_dir():
             raise CaptureRequestError("target is not an existing directory")
         self._requested = requested
-        try:
-            top_level = self._run_at(requested, ("rev-parse", "--show-toplevel"))
-        except CaptureUnknownError as error:
-            raise CaptureRequestError(
-                "target is not an observable Git worktree"
-            ) from error
+        top_level = self._initial_top_level(requested)
         try:
             root = Path(os.fsdecode(top_level.rstrip(b"\n"))).resolve(strict=True)
             requested_real = requested.resolve(strict=True)
         except (OSError, UnicodeError) as error:
-            raise CaptureRequestError(
-                "Git target root could not be resolved"
+            raise CaptureUnknownError(
+                "Git target root proof could not be resolved"
             ) from error
         if root != requested_real:
             raise CaptureRequestError("target must be the Git worktree root")
@@ -263,9 +267,11 @@ class GitTargetAdapter:
         }
 
     @staticmethod
-    def _git_argv(target: Path, args: tuple[str, ...]) -> list[str]:
-        return [
-            "git",
+    def _git_arguments(
+        target: Path | None,
+        args: tuple[str, ...],
+    ) -> list[str]:
+        arguments = [
             "--no-pager",
             "-c",
             f"core.excludesFile={os.devnull}",
@@ -285,26 +291,68 @@ class GitTargetAdapter:
             "submodule.recurse=false",
             "-c",
             "fetch.recurseSubmodules=false",
-            "-C",
-            os.fspath(target),
-            *args,
         ]
+        if target is not None:
+            arguments.extend(("-C", os.fspath(target)))
+        arguments.extend(args)
+        return arguments
+
+    @classmethod
+    def _git_argv(cls, target: Path, args: tuple[str, ...]) -> list[str]:
+        return ["git", *cls._git_arguments(target, args)]
+
+    @classmethod
+    def _descriptor_git_argv(
+        cls,
+        descriptor: int,
+        args: tuple[str, ...],
+    ) -> list[str]:
+        return [
+            sys.executable,
+            "-I",
+            "-c",
+            _DESCRIPTOR_GIT_BOOTSTRAP,
+            str(descriptor),
+            *cls._git_arguments(None, args),
+        ]
+
+    @classmethod
+    def _initial_top_level(cls, target: Path) -> bytes:
+        result = _run_bounded(
+            cls._git_argv(target, ("rev-parse", "--show-toplevel")),
+            env=cls._environment(),
+            timeout=30,
+            max_output=_MAX_GIT_OUTPUT,
+        )
+        if result.returncode != 0:
+            raise CaptureRequestError("target is not a Git worktree")
+        return result.stdout
 
     @classmethod
     def _run_at(
         cls,
-        target: Path,
+        target: Path | int,
         args: tuple[str, ...],
         *,
         allowed_codes: tuple[int, ...] = (0,),
         input_data: bytes | None = None,
     ) -> bytes:
+        inherited_fds: tuple[int, ...]
+        if isinstance(target, int):
+            if os.name != "posix":
+                raise CaptureUnknownError("descriptor-addressed Git is unsupported")
+            argv = cls._descriptor_git_argv(target, args)
+            inherited_fds = (target,)
+        else:
+            argv = cls._git_argv(target, args)
+            inherited_fds = ()
         result = _run_bounded(
-            cls._git_argv(target, args),
+            argv,
             env=cls._environment(),
             timeout=30,
             max_output=_MAX_GIT_OUTPUT,
             input_data=input_data,
+            pass_fds=inherited_fds,
         )
         if result.returncode not in allowed_codes:
             raise CaptureUnknownError("Git observation did not establish proof")
@@ -318,14 +366,28 @@ class GitTargetAdapter:
         input_data: bytes | None = None,
     ) -> bytes:
         self._verify_pinned_directories()
+        descriptor = self._descriptor_git_fd()
         output = self._run_at(
-            self.root,
+            descriptor,
             args,
             allowed_codes=allowed_codes,
             input_data=input_data,
         )
         self._verify_pinned_directories()
         return output
+
+    def _descriptor_git_fd(self) -> int:
+        if os.name != "posix" or self._root_fd < 0:
+            raise CaptureUnknownError("descriptor-addressed Git is unsupported")
+        try:
+            identity = _directory_identity(os.fstat(self._root_fd))
+        except OSError as error:
+            raise CaptureUnknownError(
+                "descriptor-addressed Git is unavailable"
+            ) from error
+        if identity != self._root_identity or not stat.S_ISDIR(identity[2]):
+            raise CaptureUnknownError("descriptor-addressed Git identity changed")
+        return self._root_fd
 
     def _resolve_git_directory(self, raw: bytes) -> Path:
         try:
@@ -375,13 +437,14 @@ class GitTargetAdapter:
 
     def capture(self, instruction_paths: Sequence[bytes]) -> CaptureSnapshot:
         self._verify_pinned_directories()
+        self._reject_target_program_configuration()
         head_oid = self._single_oid(("rev-parse", "HEAD^{commit}"))
         tree_oid = self._single_oid(("rev-parse", f"{head_oid}^{{tree}}"))
         index = self._run(("ls-files", "--stage", "-z"))
         tree = self._run(("ls-tree", "-rz", "--full-tree", tree_oid))
-        status = self._status()
         tree_entries = self._parse_tree(tree)
         index_entries = self._parse_index(index)
+        status = self._status()
         instructions = self._capture_instructions(instruction_paths, tree_entries)
         worktree_manifest = self._worktree_manifest(index_entries)
         object_manifest = self._object_manifest(tree_entries)
@@ -445,6 +508,19 @@ class GitTargetAdapter:
             capabilities=self._capabilities(),
         )
         return CaptureSnapshot(target=target, instructions=instructions)
+
+    def _reject_target_program_configuration(self) -> None:
+        filters = self._run(
+            (
+                "config",
+                "--includes",
+                "--get-regexp",
+                r"^filter\..*\.(clean|process)$",
+            ),
+            allowed_codes=(0, 1),
+        )
+        if filters:
+            raise CaptureUnknownError("target Git programs are unsupported")
 
     def _status(self) -> bytes:
         return self._run(
@@ -607,7 +683,7 @@ class GitTargetAdapter:
     ) -> bytes:
         manifest: list[JsonValue] = []
         for mode, oid, stage, path in entries:
-            content, kind, _metadata = self._read_relative_object(
+            content, kind, metadata = self._read_relative_object(
                 self._root_fd, path.raw_bytes()
             )
             manifest.append(
@@ -619,6 +695,15 @@ class GitTargetAdapter:
                     "path": path_identity_payload(path),
                     "size": len(content),
                     "stage": stage,
+                    "stat": {
+                        "change_time_ns": metadata.st_ctime_ns,
+                        "device": metadata.st_dev,
+                        "inode": metadata.st_ino,
+                        "mode": metadata.st_mode,
+                        "modify_time_ns": metadata.st_mtime_ns,
+                        "permissions": stat.S_IMODE(metadata.st_mode),
+                        "size": metadata.st_size,
+                    },
                 }
             )
         return canonical_bytes(manifest)
@@ -715,20 +800,18 @@ class GitTargetAdapter:
 
     @staticmethod
     def _capabilities() -> tuple[CapabilityClaimV1, ...]:
-        adapter_evidence = digest_bytes(b"acg-git-adapter-v1")
-
         def claim(name: str, status: CapabilityStatus) -> CapabilityClaimV1:
             return CapabilityClaimV1(
                 name=name,
                 status=status,
                 adapter_id=_ADAPTER_ID,
                 adapter_version=_ADAPTER_VERSION,
-                evidence_digest=adapter_evidence if status == "proven" else None,
+                evidence_digest=None,
             )
 
         values = (
             claim("descriptor_pinned_reads", "unknown"),
-            claim("git_immutable_objects", "proven"),
+            claim("git_immutable_objects", "unknown"),
             claim("git_network_disabled", "unknown"),
             claim(
                 "windows_reparse_protection",

@@ -8,10 +8,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from agent_continuity.kernel.canonical import CanonicalJSONError, digest_bytes
-from agent_continuity.kernel.capabilities import (
-    CapabilityClaimV1,
-    capability_payload,
-)
+from agent_continuity.kernel.capabilities import CapabilityClaimV1
 from agent_continuity.kernel.model import Digest, JsonObject, StoredRecord
 from agent_continuity.kernel.paths import PathIdentityV1, path_identity_payload
 from agent_continuity.kernel.records import (
@@ -139,10 +136,18 @@ class TargetAdapter(Protocol):
 
 
 def target_identity_payload(target: TargetIdentityV1) -> JsonObject:
+    capabilities: JsonObject = {}
+    for item in target.capabilities:
+        capabilities[item.name] = {
+            "adapter_id": item.adapter_id,
+            "adapter_version": item.adapter_version,
+            "evidence_digest": item.evidence_digest,
+            "status": item.status,
+        }
     return {
         "adapter_id": target.adapter_id,
         "adapter_version": target.adapter_version,
-        "capabilities": [capability_payload(item) for item in target.capabilities],
+        "capabilities": capabilities,
         "filesystem_id": target.filesystem_id,
         "git_object_manifest_digest": target.git_object_manifest_digest,
         "head_oid": target.head_oid,

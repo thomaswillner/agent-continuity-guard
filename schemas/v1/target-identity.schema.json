@@ -3,7 +3,49 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
-    "oid": {"pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$", "type": "string"}
+    "oid": {"pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$", "type": "string"},
+    "targetCapability": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "proven"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence_digest": {"$ref": "#/$defs/digest"}
+            }
+          }
+        }
+      ],
+      "properties": {
+        "adapter_id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]*$",
+          "type": "string"
+        },
+        "adapter_version": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]*$",
+          "type": "string"
+        },
+        "evidence_digest": {
+          "anyOf": [
+            {"$ref": "#/$defs/digest"},
+            {"type": "null"}
+          ]
+        },
+        "status": {"enum": ["proven", "unsupported", "unknown"]}
+      },
+      "required": [
+        "adapter_id",
+        "adapter_version",
+        "evidence_digest",
+        "status"
+      ],
+      "type": "object"
+    }
   },
   "additionalProperties": false,
   "properties": {
@@ -18,12 +60,11 @@
       "type": "string"
     },
     "capabilities": {
-      "items": {
-        "$ref": "https://agent-continuity-guard.dev/schemas/v1/capability-claim.schema.json"
+      "additionalProperties": {"$ref": "#/$defs/targetCapability"},
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,127}$"
       },
-      "type": "array",
-      "uniqueItems": true,
-      "x-acg-sorted-unique-by": "name"
+      "type": "object"
     },
     "filesystem_id": {
       "maxLength": 128,

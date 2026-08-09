@@ -126,3 +126,13 @@ def test_state_ancestor_swap_during_creation_fails_closed(
     with pytest.raises(StatePathError):
         creator(repo.root, repo.git_dir, candidate)
     assert not (repo.root / "state").exists()
+
+
+def test_store_package_exports_only_pinned_creation_surface() -> None:
+    import agent_continuity.store as store
+
+    assert store.ExternalStateRoot is state_paths.ExternalStateRoot
+    assert store.open_external_state_root is state_paths.open_external_state_root
+    assert store.resolve_state_home is state_paths.resolve_state_home
+    assert "assert_external_state" not in store.__all__
+    assert not hasattr(store, "assert_external_state")
