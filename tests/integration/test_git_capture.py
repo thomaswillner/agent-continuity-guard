@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
+import json
 import os
 import shutil
 import stat
 import struct
 import subprocess
-import sys
+import time
+from itertools import pairwise
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -20,11 +24,35 @@ from agent_continuity.capture.base import (
 from agent_continuity.capture.git import GitTargetAdapter
 from agent_continuity.kernel.canonical import canonical_bytes, digest_bytes
 from tests.helpers.git_repo import (
+    GitExecutableWrapper,
     GitRepo,
+    make_git_executable_wrapper,
     make_git_repo,
     repository_git_observation,
     repository_write_manifest,
 )
+
+
+def use_git_wrapper(
+    monkeypatch: pytest.MonkeyPatch, wrapper: GitExecutableWrapper
+) -> None:
+    current_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", os.fspath(wrapper.bin_dir) + os.pathsep + current_path)
+
+
+def install_symbolic_head_chain(
+    repo: GitRepo, names: tuple[str, ...], terminal_oid: str
+) -> None:
+    if not names:
+        raise ValueError("symbolic chain requires at least one name")
+    refs = repo.git_dir / "refs" / "heads"
+    refs.mkdir(parents=True, exist_ok=True)
+    (repo.git_dir / "HEAD").write_text(
+        f"ref: refs/heads/{names[0]}\n", encoding="ascii"
+    )
+    for current, following in pairwise(names):
+        (refs / current).write_text(f"ref: refs/heads/{following}\n", encoding="ascii")
+    (refs / names[-1]).write_text(f"{terminal_oid}\n", encoding="ascii")
 
 
 def test_clean_git_capture_is_deterministic_and_read_only(tmp_path: Path) -> None:
@@ -470,94 +498,73 @@ def test_unverified_capture_capabilities_are_not_overclaimed(
     "stream",
     ["stdout", "stderr"],
 )
-def test_bounded_runner_rejects_inflight_output_overflow(
+def test_capture_rejects_inflight_git_output_overflow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     stream: str,
 ) -> None:
-    runner = getattr(git_capture, "_run_bounded", None)
-    assert callable(runner)
-    descriptor = "1" if stream == "stdout" else "2"
-    program = f"import os; os.write({descriptor}, b'x' * 65536)"
-
-    with pytest.raises(CaptureUnknownError):
-        runner(
-            [sys.executable, "-c", program],
-            env={"LC_ALL": "C"},
-            timeout=5,
-            max_output=1024,
-        )
-
-
-def test_bounded_runner_classifies_timeout_as_unknown() -> None:
-    runner = getattr(git_capture, "_run_bounded", None)
-    assert callable(runner)
-
-    with pytest.raises(CaptureUnknownError):
-        runner(
-            [sys.executable, "-c", "import time; time.sleep(2)"],
-            env={"LC_ALL": "C"},
-            timeout=0.05,
-            max_output=1024,
-        )
-
-
-def test_descriptor_bootstrap_closes_root_fd_before_git_exec(tmp_path: Path) -> None:
     repo = make_git_repo(tmp_path)
-    descriptor = os.open(repo.root, os.O_RDONLY)
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    fake_git = fake_bin / "git"
-    fake_git.write_text(
-        f"#!{sys.executable}\n"
-        "import errno\n"
-        "import os\n"
-        "import sys\n"
-        "descriptor = int(os.environ['EXPECTED_FD'])\n"
-        "try:\n"
-        "    os.fstat(descriptor)\n"
-        "except OSError as error:\n"
-        "    if error.errno == errno.EBADF:\n"
-        "        sys.stdout.buffer.write(b'closed')\n"
-        "        raise SystemExit(0)\n"
-        "sys.stdout.buffer.write(b'open')\n"
-        "raise SystemExit(1)\n",
-        encoding="utf-8",
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(overflow_stream=stream)
+    use_git_wrapper(monkeypatch, wrapper)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root)
+
+
+def test_capture_classifies_git_timeout_as_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(sleep_seconds=31, once=True)
+    use_git_wrapper(monkeypatch, wrapper)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root)
+
+
+def test_descriptor_bootstrap_closes_root_fd_before_git_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    probe = tmp_path / "open-fds.json"
+    wrapper.configure(
+        trigger_command="rev-parse",
+        once=True,
+        fd_probe=os.fspath(probe),
     )
-    fake_git.chmod(0o700)
-    try:
-        result = git_capture._run_bounded(
-            GitTargetAdapter._descriptor_git_argv(
-                descriptor, ("rev-parse", "HEAD"), fake_git
-            ),
-            env={
-                "EXPECTED_FD": str(descriptor),
-                "LC_ALL": "C",
-                "PATH": os.fspath(fake_bin),
-            },
-            timeout=5,
-            max_output=1024,
-            pass_fds=(descriptor,),
-        )
-    finally:
-        os.close(descriptor)
+    use_git_wrapper(monkeypatch, wrapper)
 
-    assert result.returncode == 0
-    assert result.stdout == b"closed"
+    GitTargetAdapter(repo.root)
+
+    assert json.loads(probe.read_text(encoding="utf-8")) == []
 
 
-@pytest.mark.parametrize("failure", ["spawn", "timeout", "overflow"])
-def test_constructor_preserves_initial_proof_failures_as_unknown(
+@pytest.mark.parametrize(
+    "failure",
+    ["missing-interpreter", "invalid-format", "not-executable"],
+)
+def test_constructor_preserves_initial_launch_failures_as_unknown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
     repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    executable = wrapper.bin_dir / "git"
+    if failure == "missing-interpreter":
+        executable.write_text(
+            "#!/definitely/missing/interpreter\n", encoding="utf-8"
+        )
+    elif failure == "invalid-format":
+        executable.write_text("not an executable format\n", encoding="utf-8")
+    else:
+        executable.chmod(0o600)
+    monkeypatch.setenv("PATH", os.fspath(wrapper.bin_dir))
 
-    def fail_initial_observation(*_args: object, **_kwargs: object) -> object:
-        raise CaptureUnknownError(f"initial {failure} proof failure")
-
-    monkeypatch.setattr(git_capture, "_run_bounded", fail_initial_observation)
-
-    with pytest.raises(CaptureUnknownError, match=failure):
+    with pytest.raises(CaptureUnknownError):
         GitTargetAdapter(repo.root)
 
 
@@ -635,18 +642,16 @@ def test_requested_root_is_pinned_before_first_git_process(
     assert replacement_head != original_head
 
     displaced = tmp_path / "displaced-original"
-    real_run_bounded = git_capture._run_bounded
-    swapped = False
-
-    def swap_before_first_git(*args: object, **kwargs: object) -> object:
-        nonlocal swapped
-        if not swapped:
-            original.root.rename(displaced)
-            replacement.root.rename(original.root)
-            swapped = True
-        return real_run_bounded(*args, **kwargs)
-
-    monkeypatch.setattr(git_capture, "_run_bounded", swap_before_first_git)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        once=True,
+        root_swap={
+            "target": os.fspath(original.root),
+            "displaced": os.fspath(displaced),
+            "replacement": os.fspath(replacement.root),
+        },
+    )
+    use_git_wrapper(monkeypatch, wrapper)
     adapter: GitTargetAdapter | None = None
     try:
         try:
@@ -659,7 +664,7 @@ def test_requested_root_is_pinned_before_first_git_process(
     finally:
         if adapter is not None:
             adapter.close()
-        if swapped:
+        if displaced.exists():
             original.root.rename(replacement.root)
             displaced.rename(original.root)
 
@@ -668,16 +673,10 @@ def test_capture_git_processes_use_absolute_git_and_no_forbidden_porcelain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    real_run_bounded = git_capture._run_bounded
-    observed_argv: list[tuple[str, ...]] = []
-
-    def record_argv(argv: object, *args: object, **kwargs: object) -> object:
-        assert isinstance(argv, (list, tuple))
-        observed_argv.append(tuple(str(item) for item in argv))
-        return real_run_bounded(argv, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(git_capture, "_run_bounded", record_argv)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    use_git_wrapper(monkeypatch, wrapper)
     GitTargetAdapter(repo.root).capture(())
+    observed_argv = wrapper.invocations()
 
     forbidden = {
         "status",
@@ -690,7 +689,7 @@ def test_capture_git_processes_use_absolute_git_and_no_forbidden_porcelain(
     assert observed_argv
     assert all(not forbidden.intersection(argv) for argv in observed_argv)
     assert all(
-        any(Path(item).is_absolute() and Path(item).name == "git" for item in argv)
+        Path(argv[0]).is_absolute() and Path(argv[0]).name == "git"
         for argv in observed_argv
     )
 
@@ -964,25 +963,121 @@ def test_dual_object_format_is_unknown(
         adapter.capture(())
 
 
-@pytest.mark.parametrize(
-    ("limit_name", "limit_value"),
-    [
-        ("_MAX_TRAVERSAL_DEPTH", 1),
-        ("_MAX_TRAVERSAL_ENTRIES", 2),
-        ("_MAX_TOTAL_PATH_BYTES", 8),
-        ("_MAX_FILE_BYTES", 4),
-        ("_MAX_TOTAL_FILE_BYTES", 4),
-        ("_MAX_CAPTURE_SECONDS", 1e-9),
-    ],
-)
-def test_capture_resource_limits_fail_closed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    limit_name: str,
-    limit_value: int | float,
+def test_capture_rejects_excessive_repository_depth(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    deep_file = repo.root.joinpath(*(f"d{index}" for index in range(129)), "leaf")
+    deep_file.parent.mkdir(parents=True)
+    deep_file.write_text("deep\n", encoding="utf-8")
+    repo.git("add", ".")
+    repo.git("commit", "-q", "-m", "deep path")
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_capture_rejects_excessive_declared_index_entries(tmp_path: Path) -> None:
+    repo = make_git_repo(tmp_path)
+    index_path = repo.git_dir / "index"
+    raw_index = index_path.read_bytes()
+    body = bytearray(raw_index[:-20])
+    struct.pack_into("!I", body, 8, 1_000_001)
+    index_path.write_bytes(bytes(body) + hashlib.sha1(body).digest())
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_capture_rejects_oversized_reported_tracked_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
-    monkeypatch.setattr(git_capture, limit_name, limit_value)
+    tracked_identity = (repo.root / "README.md").stat().st_ino
+    real_read = os.read
+
+    class OversizedChunk(bytes):
+        def __len__(self) -> int:
+            return 1024 * 1024 * 1024 + 1
+
+    def oversized_read(descriptor: int, size: int) -> bytes:
+        if os.fstat(descriptor).st_ino == tracked_identity:
+            return OversizedChunk(b"x")
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr(os, "read", oversized_read)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_capture_rejects_cumulative_reported_file_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cumulative-file-limit"
+    root.mkdir()
+    repo = GitRepo(root)
+    repo.git("init", "-q")
+    repo.git("config", "user.name", "Synthetic Test")
+    repo.git("config", "user.email", "synthetic@example.invalid")
+    reported_size = 900 * 1024 * 1024
+    for index in range(5):
+        content = f"limit-probe-{index}\n".encode("ascii")
+        path = f"file-{index}.txt"
+        (root / path).write_bytes(content)
+        oid = hashlib.sha1(
+            b"blob "
+            + str(reported_size).encode("ascii")
+            + b"\x00"
+            + content
+        ).hexdigest()
+        repo.git(
+            "update-index",
+            "--add",
+            "--info-only",
+            "--cacheinfo",
+            f"100644,{oid},{path}",
+        )
+    tree = repo.git("write-tree", "--missing-ok").strip()
+    commit = repo.git("commit-tree", tree, "-m", "logical large files").strip()
+    repo.git("update-ref", "HEAD", commit)
+    adapter = GitTargetAdapter(repo.root)
+    real_len = builtins.len
+
+    def reported_len(value: object) -> int:
+        if type(value) is bytes and value.startswith(b"limit-probe-"):
+            return reported_size
+        return real_len(value)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "len", reported_len)
+
+    with pytest.raises(CaptureUnknownError):
+        adapter.capture(())
+
+
+def test_capture_rejects_oversized_reported_path_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    root_identity = (repo.root.stat().st_dev, repo.root.stat().st_ino)
+    real_listdir = os.listdir
+
+    class OversizedPath(bytes):
+        def __len__(self) -> int:
+            return 256 * 1024 * 1024 + 1
+
+    def oversized_listdir(path: int | str | bytes) -> list[str | bytes]:
+        names = real_listdir(path)
+        if isinstance(path, int):
+            metadata = os.fstat(path)
+            if (metadata.st_dev, metadata.st_ino) == root_identity:
+                return [
+                    OversizedPath(os.fsencode(name))
+                    if os.fsencode(name) == b"README.md"
+                    else name
+                    for name in names
+                ]
+        return cast(list[str | bytes], names)
+
+    monkeypatch.setattr(os, "listdir", oversized_listdir)
 
     with pytest.raises(CaptureUnknownError):
         GitTargetAdapter(repo.root).capture(())
@@ -992,27 +1087,39 @@ def test_elapsed_limit_is_rechecked_after_final_observation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    use_git_wrapper(monkeypatch, wrapper)
     adapter = GitTargetAdapter(repo.root)
-    original_observe = adapter._observe
-    clock = 0.0
-    observation_count = 0
+    real_monotonic = time.monotonic
 
     def monotonic() -> float:
-        return clock
+        completed_tree_reads = sum(
+            "ls-tree" in invocation for invocation in wrapper.invocations()
+        )
+        return real_monotonic() + (31.0 if completed_tree_reads >= 2 else 0.0)
 
-    def advance_after_final_observation(
-        requested: tuple[object, ...],
-    ) -> object:
-        nonlocal clock, observation_count
-        result = original_observe(requested)  # type: ignore[arg-type]
-        observation_count += 1
-        if observation_count == 2:
-            clock = 2.0
-        return result
+    monkeypatch.setattr(time, "monotonic", monotonic)
 
-    monkeypatch.setattr(git_capture, "_MAX_CAPTURE_SECONDS", 1.0)
-    monkeypatch.setattr(git_capture.time, "monotonic", monotonic)
-    monkeypatch.setattr(adapter, "_observe", advance_after_final_observation)
+    with pytest.raises(CaptureUnknownError):
+        adapter.capture(())
+
+
+def test_elapsed_budget_covers_post_git_observation_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    use_git_wrapper(monkeypatch, wrapper)
+    adapter = GitTargetAdapter(repo.root)
+    real_monotonic = time.monotonic
+
+    def monotonic() -> float:
+        tree_read_started = any(
+            "ls-tree" in invocation for invocation in wrapper.invocations()
+        )
+        return real_monotonic() + (31.0 if tree_read_started else 0.0)
+
+    monkeypatch.setattr(time, "monotonic", monotonic)
 
     with pytest.raises(CaptureUnknownError):
         adapter.capture(())
@@ -1044,21 +1151,25 @@ def test_tracked_parent_directory_rename_swap_is_unknown(
     assert swapped
 
 
-@pytest.mark.parametrize("returncode", [1, -9])
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"exit_code": 1},
+        {"signal": "SIGKILL"},
+    ],
+)
 def test_present_git_with_abnormal_initial_result_is_unknown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    returncode: int,
+    action: dict[str, object],
 ) -> None:
     repo = make_git_repo(tmp_path)
-
-    def abnormal_result(*_args: object, **_kwargs: object) -> object:
-        return git_capture._BoundedResult(returncode, b"", b"redacted")
-
-    monkeypatch.setattr(git_capture, "_run_bounded", abnormal_result)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(stderr_text="private-process-detail", **action)
+    use_git_wrapper(monkeypatch, wrapper)
     with pytest.raises(CaptureUnknownError) as captured:
         GitTargetAdapter(repo.root)
-    assert "redacted" not in str(captured.value)
+    assert "private-process-detail" not in str(captured.value)
 
 
 def test_git_locator_symlink_is_unknown(tmp_path: Path) -> None:
@@ -1102,3 +1213,156 @@ def test_remote_identity_export_contains_only_digest(tmp_path: Path) -> None:
     assert snapshot.target.sanitized_remote_identity_digest is not None
     assert remote.encode("utf-8") not in exported
     assert b"private/repository" not in exported
+
+
+def test_recursive_symbolic_ref_chain_captures_stable_terminal(
+    tmp_path: Path,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    install_symbolic_head_chain(repo, ("link-a", "link-b", "base-a"), head)
+
+    snapshot = GitTargetAdapter(repo.root).capture(())
+
+    assert snapshot.target.head_oid == head
+    assert snapshot.target.is_clean
+
+
+def test_terminal_symbolic_ref_mutation_during_capture_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_git_repo(tmp_path)
+    original = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    tree = repo.git("rev-parse", "HEAD^{tree}").strip().decode("ascii")
+    replacement = (
+        repo.git("commit-tree", tree, "-p", original, "-m", "same tree")
+        .strip()
+        .decode("ascii")
+    )
+    assert replacement != original
+    install_symbolic_head_chain(repo, ("link", "base-a"), original)
+    terminal_ref = repo.git_dir / "refs" / "heads" / "base-a"
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(
+        trigger_command="config",
+        once=True,
+        mutate_path=os.fspath(terminal_ref),
+        mutate_content=f"{replacement}\n",
+    )
+    use_git_wrapper(monkeypatch, wrapper)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize("chain_state", ["cycle", "too-deep", "malformed"])
+def test_symbolic_ref_cycle_depth_and_malformed_chain_are_unknown(
+    tmp_path: Path, chain_state: str
+) -> None:
+    repo = make_git_repo(tmp_path)
+    head = repo.git("rev-parse", "HEAD^{commit}").strip().decode("ascii")
+    refs = repo.git_dir / "refs" / "heads"
+    if chain_state == "cycle":
+        (repo.git_dir / "HEAD").write_text("ref: refs/heads/link-a\n", encoding="ascii")
+        (refs / "link-a").write_text("ref: refs/heads/link-b\n", encoding="ascii")
+        (refs / "link-b").write_text("ref: refs/heads/link-a\n", encoding="ascii")
+    elif chain_state == "too-deep":
+        names = tuple(f"link-{index:02d}" for index in range(65))
+        install_symbolic_head_chain(repo, names, head)
+    else:
+        (repo.git_dir / "HEAD").write_text("ref: refs/heads/link-a\n", encoding="ascii")
+        (refs / "link-a").write_text("ref: refs/heads/bad ref\n", encoding="ascii")
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+@pytest.mark.parametrize("command", ["ls-tree", "ls-files"])
+def test_nonempty_z_output_without_terminal_nul_is_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    wrapper = make_git_executable_wrapper(tmp_path)
+    wrapper.configure(trigger_command=command, strip_final_nul=True)
+    use_git_wrapper(monkeypatch, wrapper)
+
+    with pytest.raises(CaptureUnknownError):
+        GitTargetAdapter(repo.root).capture(())
+
+
+def test_empty_z_output_has_defined_empty_repository_semantics(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "empty-target"
+    root.mkdir()
+    repo = GitRepo(root)
+    repo.git("init", "-q")
+    repo.git("config", "user.name", "Synthetic Test")
+    repo.git("config", "user.email", "synthetic@example.invalid")
+    repo.git("read-tree", "--empty")
+    repo.git("commit", "-q", "--allow-empty", "-m", "empty tree")
+
+    snapshot = GitTargetAdapter(repo.root).capture(())
+
+    assert snapshot.target.is_clean
+
+
+@pytest.mark.parametrize(
+    "invalid_target",
+    ["bad\x00path", "", b"byte-target"],
+)
+def test_plainly_invalid_caller_target_is_request_error(
+    invalid_target: object,
+) -> None:
+    with pytest.raises(CaptureRequestError) as captured:
+        GitTargetAdapter(invalid_target)  # type: ignore[arg-type]
+    assert "embedded null byte" not in str(captured.value)
+
+
+@pytest.mark.parametrize("field", ["url", "pushurl"])
+@pytest.mark.parametrize(
+    "unsafe_remote",
+    [
+        (
+            "https://user:secret@example.invalid/"  # pragma: allowlist secret
+            "repository.git"
+        ),
+        "https://example.invalid/repository.git?token=secret",
+        "https://example.invalid/repository.git#private",
+        "ext::credential-helper",
+        "file:///private/repository.git",
+    ],
+)
+def test_every_unsafe_fetch_or_push_remote_is_redacted_unknown(
+    tmp_path: Path, field: str, unsafe_remote: str
+) -> None:
+    repo = make_git_repo(tmp_path, remote="https://example.invalid/safe/repository.git")
+    repo.git("config", "--add", f"remote.origin.{field}", unsafe_remote)
+
+    with pytest.raises(CaptureUnknownError) as captured:
+        GitTargetAdapter(repo.root).capture(())
+    assert unsafe_remote not in str(captured.value)
+    assert "secret" not in str(captured.value)
+
+
+def test_valid_push_remote_contributes_to_remote_identity_digest(
+    tmp_path: Path,
+) -> None:
+    repo = make_git_repo(
+        tmp_path, remote="https://example.invalid/fetch/repository.git"
+    )
+    before = GitTargetAdapter(repo.root).capture(())
+    repo.git(
+        "config",
+        "--add",
+        "remote.origin.pushurl",
+        "ssh://git@example.invalid/push/repository.git",
+    )
+    after = GitTargetAdapter(repo.root).capture(())
+
+    assert (
+        before.target.sanitized_remote_identity_digest
+        != after.target.sanitized_remote_identity_digest
+    )

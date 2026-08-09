@@ -49,6 +49,7 @@ _MAX_TRAVERSAL_ENTRIES: Final = 1_000_000
 _MAX_TOTAL_PATH_BYTES: Final = 256 * 1024 * 1024
 _MAX_CAPTURE_SECONDS: Final = 30.0
 _MAX_METADATA_BYTES: Final = 8 * 1024 * 1024
+_MAX_SYMBOLIC_REF_DEPTH: Final = 32
 _ALLOWED_INDEX_EXTENSIONS: Final = frozenset({b"TREE"})
 _OID_RE = re.compile(rb"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _SCP_REMOTE_RE = re.compile(
@@ -375,6 +376,71 @@ def _validate_repo_path(raw_path: bytes) -> None:
         raise CaptureUnknownError("Git path depth exceeded limit")
 
 
+def _validate_symbolic_ref_path(raw_path: bytes) -> None:
+    components = raw_path.split(b"/")
+    forbidden = b" ~^:?*[\\"
+    if (
+        not raw_path.startswith(b"refs/")
+        or len(components) < 2
+        or any(
+            not component
+            or component.startswith(b".")
+            or component.endswith((b".", b".lock"))
+            for component in components
+        )
+        or b".." in raw_path
+        or b"@{" in raw_path
+        or any(
+            byte < 0x20 or byte == 0x7F or byte in forbidden for byte in raw_path
+        )
+    ):
+        raise CaptureUnknownError("symbolic reference path was malformed")
+
+
+def _metadata_line(observation: _ObservedFile) -> bytes:
+    content = observation.content
+    if content is None:
+        raise CaptureUnknownError("reference metadata was unavailable")
+    if content.endswith(b"\n"):
+        content = content[:-1]
+    if not content or b"\n" in content or b"\r" in content:
+        raise CaptureUnknownError("reference metadata was malformed")
+    return content
+
+
+def _packed_refs_contains(data: bytes, target: bytes) -> bool:
+    if data and (not data.endswith(b"\n") or b"\r" in data or b"\x00" in data):
+        raise CaptureUnknownError("packed reference metadata was malformed")
+    found = False
+    previous_entry = False
+    seen: set[bytes] = set()
+    for line in data.split(b"\n"):
+        if not line:
+            continue
+        if line.startswith(b"#"):
+            previous_entry = False
+            continue
+        if line.startswith(b"^"):
+            if not previous_entry or _OID_RE.fullmatch(line[1:]) is None:
+                raise CaptureUnknownError("packed reference metadata was malformed")
+            previous_entry = False
+            continue
+        try:
+            oid, ref_path = line.split(b" ", 1)
+            _validate_symbolic_ref_path(ref_path)
+        except (ValueError, CaptureUnknownError) as error:
+            raise CaptureUnknownError(
+                "packed reference metadata was malformed"
+            ) from error
+        if _OID_RE.fullmatch(oid) is None or ref_path in seen:
+            raise CaptureUnknownError("packed reference metadata was malformed")
+        seen.add(ref_path)
+        previous_entry = True
+        if ref_path == target:
+            found = True
+    return found
+
+
 def _file_payload(observation: _ObservedFile) -> JsonValue:
     return {
         "digest": observation.digest,
@@ -445,7 +511,11 @@ class GitTargetAdapter:
             raw_target = os.fspath(target)
         except TypeError as error:
             raise CaptureRequestError("target path is invalid") from error
-        if not isinstance(raw_target, str) or not raw_target:
+        if (
+            not isinstance(raw_target, str)
+            or not raw_target
+            or "\x00" in raw_target
+        ):
             raise CaptureRequestError("target path is invalid")
         requested = Path(os.path.abspath(raw_target))
         try:
@@ -948,30 +1018,50 @@ class GitTargetAdapter:
             required=True,
             max_bytes=_MAX_METADATA_BYTES,
         )
-        content = (head.content or b"").rstrip(b"\n")
+        content = _metadata_line(head)
         values = [head]
-        if content.startswith(b"ref: "):
+        if not content.startswith(b"ref: "):
+            if _OID_RE.fullmatch(content) is None:
+                raise CaptureUnknownError("HEAD metadata is malformed")
+            return tuple(values)
+
+        packed = self._observe_file(
+            self._common_git_fd,
+            b"packed-refs",
+            required=False,
+            max_bytes=_MAX_METADATA_BYTES,
+        )
+        visited: set[bytes] = set()
+        depth = 0
+        while content.startswith(b"ref: "):
+            if depth >= _MAX_SYMBOLIC_REF_DEPTH:
+                raise CaptureUnknownError("symbolic reference depth exceeded limit")
             ref_path = content[len(b"ref: ") :]
-            _validate_repo_path(ref_path)
-            if not ref_path.startswith(b"refs/"):
-                raise CaptureUnknownError("HEAD symbolic reference is unsupported")
+            _validate_symbolic_ref_path(ref_path)
+            if ref_path in visited:
+                raise CaptureUnknownError("symbolic reference cycle is unsupported")
+            visited.add(ref_path)
+            depth += 1
             loose = self._observe_file(
                 self._common_git_fd,
                 ref_path,
                 required=False,
                 max_bytes=_MAX_METADATA_BYTES,
             )
-            packed = self._observe_file(
-                self._common_git_fd,
-                b"packed-refs",
-                required=False,
-                max_bytes=_MAX_METADATA_BYTES,
-            )
-            if not loose.exists and not packed.exists:
+            values.append(loose)
+            if loose.exists:
+                content = _metadata_line(loose)
+                continue
+            if not packed.exists or not _packed_refs_contains(
+                packed.content or b"", ref_path
+            ):
                 raise CaptureUnknownError("HEAD reference source is unavailable")
-            values.extend((loose, packed))
-        elif b"\n" in content or b"\r" in content or _OID_RE.fullmatch(content) is None:
-            raise CaptureUnknownError("HEAD metadata is malformed")
+            values.append(packed)
+            return tuple(values)
+
+        if _OID_RE.fullmatch(content) is None:
+            raise CaptureUnknownError("HEAD reference metadata is malformed")
+        values.append(packed)
         return tuple(values)
 
     def _alternates_source(self) -> _ObservedFile:
@@ -1073,6 +1163,8 @@ class GitTargetAdapter:
     def _parse_tree(
         data: bytes, object_format: str | None = None
     ) -> tuple[_TreeEntry, ...]:
+        if data and not data.endswith(b"\x00"):
+            raise CaptureUnknownError("Git tree output was malformed")
         entries: list[_TreeEntry] = []
         previous: bytes | None = None
         total_path_bytes = 0
@@ -1120,6 +1212,8 @@ class GitTargetAdapter:
     def _parse_index(
         data: bytes, object_format: str | None = None
     ) -> tuple[_IndexEntry, ...]:
+        if data and not data.endswith(b"\x00"):
+            raise CaptureUnknownError("Git index output was malformed")
         entries: list[_IndexEntry] = []
         previous: bytes | None = None
         total_path_bytes = 0
@@ -1567,7 +1661,7 @@ class GitTargetAdapter:
     def _remote_identity_digest(config: tuple[tuple[str, str], ...]) -> Digest | None:
         identities: list[str] = []
         for key, value in config:
-            if key.startswith("remote.") and key.endswith(".url"):
+            if key.startswith("remote.") and key.endswith((".url", ".pushurl")):
                 try:
                     identities.append(_sanitize_remote(value))
                 except CaptureRequestError as error:
