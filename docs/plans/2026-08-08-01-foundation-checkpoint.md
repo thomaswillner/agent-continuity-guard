@@ -395,6 +395,7 @@ git commit -m "feat: add canonical records and verdict kernel"
 - Create: `schemas/v1/capability-claim.schema.json`
 - Create: `schemas/v1/instruction-manifest.schema.json`
 - Create: `tests/helpers/git_repo.py`
+- Create: `tests/contract/test_capture_public_boundary.py`
 - Create: `tests/integration/test_git_capture.py`
 - Create: `tests/security/test_state_root_separation.py`
 
@@ -471,6 +472,16 @@ The round-three RED set must exercise behavior, not source text:
 - bound traversal depth, entry count, total path bytes, file bytes, Git stdout/stderr, and elapsed time; never follow a symlink directory; and
 - keep these policies behind `TargetAdapter.capture()` so callers cannot opt into weaker hashing, ignore, conversion, or race behavior.
 
+After the first direct-observer residual fix remained red, boundary hardening must use centralized validators and exhaustive public-interface matrices rather than isolated case checks:
+
+- all nonempty NUL-delimited Git output passes through one canonical frame parser that requires exactly one terminal delimiter, forbids empty records anywhere, and rejects truncation or extra delimiters; an empty byte stream is the only valid zero-record frame;
+- caller target input passes one validator before `Path`, encoding, or OS calls. It accepts only supported text path-like input, rejects empty/NUL/surrogate/unencodable values and over-budget bytes/components as request errors, and maps only positively invalid filesystem input classes to request errors; inaccessible or changing proof remains UNKNOWN;
+- symbolic-ref content and each resolved ref path pass one strict grammar plus independent chain-count, total-byte, and component-count budgets no greater than the capture traversal limits. Cycles, malformed content, depth excess, and loose/packed terminal ambiguity are UNKNOWN, and every resolved dependency is re-observed;
+- remote identity parsing examines every `remote.<name>.url` and `remote.<name>.pushurl`, rejects raw or encoded control/whitespace, credentials, query, fragment, helper syntax, unsupported schemes, names, ports, or grammar, and hashes canonical tuples containing remote name, fetch/push role, and normalized value. Swapping fetch and push roles must change identity;
+- create `tests/contract/test_capture_public_boundary.py` as an AST architecture gate over Task 3 integration/security tests. Those tests may import and invoke only exported capture APIs and test-owned helpers; any direct production-private import, attribute, parser, runner, constant, or monkeypatch is a failure. Every removed private test retains an equal-or-stronger public wrapper/repository behavior probe, with collected-case inventory proving no silent coverage deletion.
+
+The RED matrix must include single/extra/missing/interior NUL frames; empty and multi-record controls; NUL, lone-surrogate, unencodable, overlong-component, over-depth, missing, nondirectory, inaccessible, and symlink target inputs; ref grammar at and one beyond every byte/component/chain boundary; URL and pushurl schemes, roles, whitespace/control encodings, credentials, ports, queries, fragments, helper forms, duplicates, and role swaps. Use hand-derived literal outcomes and public `GitTargetAdapter` calls only.
+
 - [ ] **Step 2: Run RED**
 
 ```bash
@@ -517,6 +528,8 @@ Derive `status_digest` from a canonical direct-proof record covering HEAD/index 
 
 Only positively identified caller input faults are request errors. If `.git` exists but proof is unavailable, Git exits abnormally, output is malformed, or metadata changes, return UNKNOWN without exposing target bytes or unbounded diagnostics.
 
+Implement these rules through one validator per boundary, not duplicated parser branches. Consolidate common/local Git metadata enumeration behind one descriptor-rooted helper so both worktree forms observe the same source set. The public adapter remains the only decision seam; helper functions are implementation details and receive no direct integration-test calls.
+
 - [ ] **Step 4: Implement state path resolution**
 
 Resolve macOS, Linux/XDG, Windows/LOCALAPPDATA, and absolute ACG_STATE_HOME override. Resolve existing ancestors without creating state. Refuse target/Git descendants and aliases.
@@ -537,6 +550,7 @@ Expected: all pass; target pre/post manifest is identical.
 git add src/agent_continuity/capture src/agent_continuity/kernel/capabilities.py src/agent_continuity/store/paths.py
 git add schemas/v1/capability-claim.schema.json schemas/v1/target-identity.schema.json schemas/v1/instruction-manifest.schema.json
 git add tests/helpers tests/integration/test_git_capture.py tests/security/test_state_root_separation.py
+git add tests/contract/test_capture_public_boundary.py
 git commit -m "feat: capture clean git target identity"
 ```
 
