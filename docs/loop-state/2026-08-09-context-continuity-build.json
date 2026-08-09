@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 12,
+  "revision": 13,
   "contract": {
     "revision": 1,
     "goal": {
@@ -68,14 +68,17 @@
       "Controller re-review initially reproduced a remaining Task 2 scope-boundary defect: a target-root TREE scope accepted an arbitrary non-PathIdentityV1 candidate because the root fast-path preceded candidate validation. Fix 864273b moved exact candidate validation before root acceptance and the repeated probe passed.",
       "Task 3 independent review failed with five high, four medium, and one low finding across snapshot stability, hostile Git configuration, descriptor containment, external-state TOCTOU, in-flight output bounds, remote parsing, error classification, schema/runtime parity, and linked-worktree ignore provenance.",
       "Loop-state revision 10 incorrectly reset the retry limit rather than the used count; revision 11 restores the fixed per-fingerprint limit to two and resets usage for the new Task 3 fingerprint.",
-      "Task 3 fix round 1 at 02c5256 passed 51 focused and 120 full tests plus schema, typing, lint, and diff gates, but independent re-review remained FAIL because ABA stability, target-controlled Git filters, pathname-based Git execution, error classification, standard-schema parity, and immutable-object capability truth were still open."
+      "Task 3 fix round 1 at 02c5256 passed 51 focused and 120 full tests plus schema, typing, lint, and diff gates, but independent re-review remained FAIL because ABA stability, target-controlled Git filters, pathname-based Git execution, error classification, standard-schema parity, and immutable-object capability truth were still open.",
+      "Task 3 fix round 2 at 56ffafa passed 13 direct adversarial probes, 61 focused tests, 130 full tests, nine-schema verification, strict mypy, Ruff, diff and secret scans, DCO, and clean-worktree gates; independent review remained FAIL because the target-filter preflight still races before Git status, initial discovery is pathname-based, and abnormal initial Git exits remain caller errors. Review evidence sha256:30193c8ed835ad67a2398fa7f1c46175e013289055852de0b66b843da8322b66.",
+      "The preflight-based Task 3 failure fingerprint exhausted both permitted attempts. A read-only independent design critique at sha256:bf63654572ca3a3a2e1f55c7174aeab84708a568d43eea387cb36ebb1e7f29fb requires a fundamental non-porcelain observer that proves HEAD equals index equals descriptor-read worktree with no untracked paths and retains UNKNOWN for unsupported semantics and adversarial ABA."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
       "Added provisional 80K/120K/160K cumulative ceilings alongside 50/65/75 percent rendered-context ratios, with earliest strongest action winning.",
       "Added deterministic below-threshold canonical-ID probes, verified meta-handoff lineage, adapter capability qualification, and a frozen synthetic continuity benchmark contract.",
       "Bound calibration identity to provider/model/route/harness/prompts/usage/tool-schema/workload/transition and added earlier phase, risk, operator, and tool-output boundary signals.",
-      "Corrected the Task 4 contract to require immutable receipt heads, composite sensitive-local identity by digest and kind, projection foreign keys, exact new-head record existence, defensive nested snapshots, and deterministic after-commit reconciliation."
+      "Corrected the Task 4 contract to require immutable receipt heads, composite sensitive-local identity by digest and kind, projection foreign keys, exact new-head record existence, defensive nested snapshots, and deterministic after-commit reconciliation.",
+      "Corrected Plan 1 Task 3 before round-three maker execution: requested root is pinned before first Git, git status and every conversion-capable command are forbidden, cleanliness requires direct HEAD/index/worktree equality plus no untracked paths, eligibility and traversal fail closed, and public status identity derives from a canonical direct-proof record."
     ]
   },
   "gates": [
@@ -126,16 +129,16 @@
       "implementation_plan_tasks": 38
     },
     "used": {
-      "retries_per_failure_fingerprint": 1,
+      "retries_per_failure_fingerprint": 0,
       "implementation_plan_tasks": 3
     }
   },
   "failure_fingerprint": {
     "gate": "plan1.task3.independent_review",
-    "symptom": "Task 3 round 1 remains vulnerable to ABA snapshots, target-controlled clean filters, mutable-path Git subprocesses, incorrect UNKNOWN classification, non-enforcing capability annotations, and an unsupported immutable-object capability claim.",
-    "evidence_signature": "sha256:f4b3bce889420b5c8df8bf6267480b4c176a9a98c9409765b20c91c18e004adb",
-    "hypothesis": "Metadata-bound manifests, descriptor-addressed Git execution, fail-closed filter handling, exact error preservation, map-keyed capability serialization, and conservative object-capability status close the residual Task 3 findings."
+    "symptom": "Two preflight-based attempts cannot make Git status non-executing: target filter configuration can race after validation, initial repository discovery precedes descriptor pinning, abnormal initial Git exits are misclassified, and atomic adversarial ABA proof remains unavailable.",
+    "evidence_signature": "sha256:30193c8ed835ad67a2398fa7f1c46175e013289055852de0b66b843da8322b66",
+    "hypothesis": "Pinning the requested root before any Git process, eliminating porcelain status and all worktree conversion, directly proving HEAD tree equals index equals descriptor-read worktree with no untracked paths, and returning UNKNOWN for unsupported semantics closes the executable-surface and classification findings without claiming atomic ABA protection."
   },
-  "next_action": "Complete bounded Task 3 fix round 2 and independent re-review before starting Plan 1 Task 4.",
+  "next_action": "Complete bounded Task 3 fundamental observer redesign round 3 and independent re-review before starting Plan 1 Task 4.",
   "verdict": "IN_PROGRESS"
 }

@@ -460,6 +460,17 @@ Create a clean temporary Git repo with tracked README and AGENTS. Record HEAD, t
 
 Test deterministic repeat capture, dirty target UNKNOWN, missing instruction error, exact explicit instruction order, Git object type/mode and symlink-target identity, repository/local ignore provenance, sanitized remote identity, structured capability ordering, distinction between `unsupported` and `unknown`, and rejection of state inside target/.git or symlink aliases before directory creation. Remote credentials, query strings, and fragments must reject rather than enter identity.
 
+The round-three RED set must exercise behavior, not source text:
+
+- pin the requested top-level directory before the first Git command; a pathname replacement before or during discovery may yield the originally pinned target or UNKNOWN, but never a replacement target;
+- prove all three clean-state equalities: captured HEAD tree equals the captured index, the captured index equals descriptor-read worktree bytes and modes, and no non-index path exists; staged, unstaged, mode-only, symlink-target, untracked, and ignored-only changes each yield UNKNOWN;
+- install hostile clean/process-filter configuration and attributes at every capture phase and assert the sentinel program is never executed; adding another preflight sample is not an acceptable fix;
+- classify an absent `.git` locator or a plainly invalid requested directory as a request error, while malformed, inaccessible, changing, or linked-worktree metadata and every abnormal, signalled, timed-out, overflowing, or malformed initial Git result yield UNKNOWN;
+- return UNKNOWN for conversion-sensitive attributes/configuration, sparse or split indexes, skip-worktree, intent-to-add, unmerged stages, gitlinks/submodules, unsupported modes or object types, unknown or dual object formats, and filesystems whose executable-mode semantics cannot be proved;
+- bind each tracked leaf plus every tracked-parent directory across repeated descriptor-rooted observations so ordinary writes and rename swaps yield UNKNOWN; do not claim atomic-snapshot or adversarial ABA protection;
+- bound traversal depth, entry count, total path bytes, file bytes, Git stdout/stderr, and elapsed time; never follow a symlink directory; and
+- keep these policies behind `TargetAdapter.capture()` so callers cannot opt into weaker hashing, ignore, conversion, or race behavior.
+
 - [ ] **Step 2: Run RED**
 
 ```bash
@@ -468,7 +479,7 @@ Test deterministic repeat capture, dirty target UNKNOWN, missing instruction err
 
 Expected: imports fail for capture and store paths.
 
-- [ ] **Step 3: Implement Git argv wrapper**
+- [ ] **Step 3: Implement descriptor-pinned conservative Git observer**
 
 ```python
 environment = {
@@ -490,7 +501,21 @@ argv = [
 ]
 ```
 
-Run with `shell=False`, `check=True`, 30-second timeout, and bounded stdout/stderr. Capture `rev-parse --show-toplevel`, `rev-parse --git-dir`, `rev-parse HEAD^{commit}`, `rev-parse HEAD^{tree}`, `ls-files --stage -z`, `ls-tree -rz --full-tree HEAD`, `status --porcelain=v2 -z --untracked-files=all`, repository ignore files, local exclude, and sanitized configured remote identity without credentials/query/fragment. Git-object manifests retain raw path identity, object type, mode, OID, and symlink-target blob bytes. Plan 1 returns UNKNOWN for non-empty status. Every capability claim binds adapter identity/version and an evidence digest when proved. `unsupported` means a known adapter limitation; `unknown` means proof could not be established. Neither is equivalent to `proven`.
+The example environment remains a minimum, not the containment mechanism. Resolve a trusted Git executable before entering target context. Open the requested directory component-by-component with no-follow directory descriptors before any Git discovery. Run every Git subprocess through constant Python `-I` bootstrap code that inherits only the pinned root descriptor, calls `fchdir`, closes the descriptor, and executes Git without a shell. Descriptor-read and pin a `.git` gitfile target, Git directory, and common Git directory component-by-component. Recheck their identities before returning.
+
+Run with `shell=False`, a 30-second deadline, bounded in-flight stdout/stderr, disabled lazy fetch/replacements/hooks/fsmonitor/pager/prompt/network protocols, and sanitized system/global configuration roots. Only conversion-free plumbing may observe repository metadata. Allowed operations include bounded `rev-parse` identity/object-format queries, unfiltered object reads, `ls-files --stage -z`, and `ls-tree -rz --full-tree HEAD`. Never invoke `status`, `diff`, `check-attr`, `hash-object --path`, textconv, checkout, filtered object conversion, submodule traversal, or another command that can execute target-selected programs.
+
+Pin raw index bytes and their digest, HEAD commit/tree OIDs, object-format identity, repository/local configuration and attribute sources, and all Git/common-directory evidence used by the decision. Compare canonical HEAD tree entries to index entries so staged additions, removals, content, type, and mode changes yield UNKNOWN. Support only index semantics proved safe by the adapter; sparse/split indexes, skip-worktree, intent-to-add, unmerged stages, unknown required extensions, gitlinks, and unsupported types yield UNKNOWN.
+
+Compare each eligible index entry to descriptor-read worktree state. For regular modes `100644` and `100755`, hash exactly `b"blob " + decimal_length + b"\0" + content` using the proved repository SHA-1 or SHA-256 object format and compare executable semantics exactly. For `120000`, hash raw link-target bytes without following. Reject unknown or compatibility/dual object formats. Enumerate the worktree descriptor-rooted without following symlink directories; permit only tracked entries, their parent directories, and the pinned Git locator. Any other path, including an ignored path, yields UNKNOWN.
+
+Conversion eligibility is fail closed. Any tracked or worktree `.gitattributes`, common/local/info attributes, config include, `filter.*.clean/process`, non-disabled `core.autocrlf`, non-default `core.eol`, or semantics involving `text`, `eol`, `ident`, `working-tree-encoding`, sparse checkout, or an unknown conversion source yields UNKNOWN. This eligibility check controls whether cleanliness can be proved; non-execution correctness comes mechanically from never invoking worktree-converting Git commands.
+
+Repeat descriptor-rooted file, index, Git-metadata, configuration/attribute, and tracked-parent-directory observations before returning. Any device, inode, type, mode, link count, size, `ctime`, `mtime`, directory entry, digest, or relevant locator change yields UNKNOWN. This is a bounded seqlock, not an atomic snapshot; retain descriptor-pinned-read, immutable-object, network, and atomic-snapshot capability claims as `unknown` unless independently proved.
+
+Derive `status_digest` from a canonical direct-proof record covering HEAD/index equality, index/worktree equality, absence of untracked paths, observer version, and eligibility evidence; do not store `git status` output. Git-object manifests retain raw path identity, object type, mode, OID, and symlink-target blob bytes. Every capability claim binds adapter identity/version and an evidence digest when proved. `unsupported` means a known adapter limitation; `unknown` means proof could not be established. Neither is equivalent to `proven`.
+
+Only positively identified caller input faults are request errors. If `.git` exists but proof is unavailable, Git exits abnormally, output is malformed, or metadata changes, return UNKNOWN without exposing target bytes or unbounded diagnostics.
 
 - [ ] **Step 4: Implement state path resolution**
 
