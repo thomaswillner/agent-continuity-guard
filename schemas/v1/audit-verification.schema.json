@@ -1,0 +1,36 @@
+{
+  "$id": "https://agent-continuity-guard.invalid/schemas/v1/audit-verification.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit_head_id": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "audit_sequence": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "store_id": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]*$",
+      "type": "string"
+    },
+    "supplied_anchor_matched": {
+      "type": "boolean"
+    },
+    "valid": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "audit_head_id",
+    "audit_sequence",
+    "store_id",
+    "supplied_anchor_matched",
+    "valid"
+  ],
+  "title": "AuditVerification/v1",
+  "type": "object",
+  "x-record-type": "AuditVerification/v1"
+}

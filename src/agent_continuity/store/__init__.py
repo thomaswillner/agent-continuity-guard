@@ -1,5 +1,39 @@
-"""External Agent Continuity Guard state adapters."""
+"""External Agent Continuity Guard state contracts and adapters."""
 
+from .base import (
+    AuditEventDraft,
+    AuditHeadState,
+    CommitReceipt,
+    HeadState,
+    HeadUpdate,
+    MultiHeadCommitReceipt,
+    SensitiveLocalValueDraft,
+    StateStore,
+    StateStoreError,
+    StoreConflictError,
+    StoreIntegrityError,
+    StoreValidationError,
+)
+from .memory import MemoryStateStore
 from .paths import ExternalStateRoot, open_external_state_root, resolve_state_home
+from .sqlite import SQLiteStateStore
 
-__all__ = ["ExternalStateRoot", "open_external_state_root", "resolve_state_home"]
+__all__ = [
+    "AuditEventDraft",
+    "AuditHeadState",
+    "CommitReceipt",
+    "ExternalStateRoot",
+    "HeadState",
+    "HeadUpdate",
+    "MemoryStateStore",
+    "MultiHeadCommitReceipt",
+    "SQLiteStateStore",
+    "SensitiveLocalValueDraft",
+    "StateStore",
+    "StateStoreError",
+    "StoreConflictError",
+    "StoreIntegrityError",
+    "StoreValidationError",
+    "open_external_state_root",
+    "resolve_state_home",
+]

@@ -1,0 +1,46 @@
+{
+  "$id": "https://agent-continuity-guard.invalid/schemas/v1/audit-anchor.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audit_head_id": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "audit_sequence": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "created_at": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "type": "string"
+    },
+    "label": {
+      "oneOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "store_id": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]*$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "audit_head_id",
+    "audit_sequence",
+    "created_at",
+    "label",
+    "store_id"
+  ],
+  "title": "AuditAnchor/v1",
+  "type": "object",
+  "x-record-type": "AuditAnchor/v1"
+}

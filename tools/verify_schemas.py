@@ -93,6 +93,39 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
         "segment_offsets": [0],
     }
     return {
+        "audit-anchor.schema.json": {
+            "audit_head_id": digest,
+            "audit_sequence": 1,
+            "created_at": "2026-08-09T12:00:00Z",
+            "label": None,
+            "store_id": "store-test",
+        },
+        "audit-event.schema.json": {
+            "details": {},
+            "head_updates": [
+                {
+                    "expected": None,
+                    "name": "checkpoint",
+                    "new_record_id": digest,
+                }
+            ],
+            "inserted_record_ids": [digest],
+            "kind": "checkpoint",
+            "local_values": [],
+            "logical_time": "2026-08-09T12:00:00Z",
+            "previous_event_id": None,
+            "record_ids": [digest],
+            "sequence": 1,
+            "store_id": "store-test",
+            "subject_id": digest,
+        },
+        "audit-verification.schema.json": {
+            "audit_head_id": digest,
+            "audit_sequence": 1,
+            "store_id": "store-test",
+            "supplied_anchor_matched": False,
+            "valid": True,
+        },
         "capability-claim.schema.json": capability,
         "evaluation-result.schema.json": {
             "findings": [],

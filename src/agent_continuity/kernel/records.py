@@ -13,6 +13,9 @@ _FIELD_COMPONENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 SCHEMA_REGISTRY: dict[str, str] = {
+    "AuditAnchor/v1": "audit-anchor.schema.json",
+    "AuditEvent/v1": "audit-event.schema.json",
+    "AuditVerification/v1": "audit-verification.schema.json",
     "CapabilityClaim/v1": "capability-claim.schema.json",
     "EvaluationResult/v1": "evaluation-result.schema.json",
     "Fact/v1": "fact.schema.json",
