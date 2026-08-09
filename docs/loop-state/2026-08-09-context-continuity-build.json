@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 11,
+  "revision": 12,
   "contract": {
     "revision": 1,
     "goal": {
@@ -67,7 +67,8 @@
       "Mechanical runtime enforcement is not active for repository construction: current execution uses this persisted contract, explicit ownership, immutable commit ranges, and manual admission until typed state, policy, writeback, and budget controls are behaviorally available.",
       "Controller re-review initially reproduced a remaining Task 2 scope-boundary defect: a target-root TREE scope accepted an arbitrary non-PathIdentityV1 candidate because the root fast-path preceded candidate validation. Fix 864273b moved exact candidate validation before root acceptance and the repeated probe passed.",
       "Task 3 independent review failed with five high, four medium, and one low finding across snapshot stability, hostile Git configuration, descriptor containment, external-state TOCTOU, in-flight output bounds, remote parsing, error classification, schema/runtime parity, and linked-worktree ignore provenance.",
-      "Loop-state revision 10 incorrectly reset the retry limit rather than the used count; revision 11 restores the fixed per-fingerprint limit to two and resets usage for the new Task 3 fingerprint."
+      "Loop-state revision 10 incorrectly reset the retry limit rather than the used count; revision 11 restores the fixed per-fingerprint limit to two and resets usage for the new Task 3 fingerprint.",
+      "Task 3 fix round 1 at 02c5256 passed 51 focused and 120 full tests plus schema, typing, lint, and diff gates, but independent re-review remained FAIL because ABA stability, target-controlled Git filters, pathname-based Git execution, error classification, standard-schema parity, and immutable-object capability truth were still open."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -125,16 +126,16 @@
       "implementation_plan_tasks": 38
     },
     "used": {
-      "retries_per_failure_fingerprint": 0,
+      "retries_per_failure_fingerprint": 1,
       "implementation_plan_tasks": 3
     }
   },
   "failure_fingerprint": {
     "gate": "plan1.task3.independent_review",
-    "symptom": "Read-only Git capture and external-state separation do not remain truthful under concurrent mutation, hostile local configuration, path races, oversized output, malformed identities, and linked worktrees.",
-    "evidence_signature": "sha256:bd6dec852a70802c5388cc9b89e6ba7e90b643c376972472f3237c970b661934",
-    "hypothesis": "A pinned stability protocol, non-executing Git configuration, descriptor-relative containment, atomic external-state creation, bounded streaming, strict parsing and error classes, bidirectional schema parity, and common-Git-dir provenance close SP-1 through SP-9."
+    "symptom": "Task 3 round 1 remains vulnerable to ABA snapshots, target-controlled clean filters, mutable-path Git subprocesses, incorrect UNKNOWN classification, non-enforcing capability annotations, and an unsupported immutable-object capability claim.",
+    "evidence_signature": "sha256:f4b3bce889420b5c8df8bf6267480b4c176a9a98c9409765b20c91c18e004adb",
+    "hypothesis": "Metadata-bound manifests, descriptor-addressed Git execution, fail-closed filter handling, exact error preservation, map-keyed capability serialization, and conservative object-capability status close the residual Task 3 findings."
   },
-  "next_action": "Complete bounded Task 3 fix round 1 and independent re-review before starting Plan 1 Task 4.",
+  "next_action": "Complete bounded Task 3 fix round 2 and independent re-review before starting Plan 1 Task 4.",
   "verdict": "IN_PROGRESS"
 }
