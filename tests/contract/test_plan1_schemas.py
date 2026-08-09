@@ -92,3 +92,58 @@ def test_file_path_scope_cannot_use_null_root() -> None:
 
     with pytest.raises(ValidationError):
         validator.validate({"kind": "file", "path": None})
+
+
+def test_capture_schemas_accept_strict_golden_records() -> None:
+    schemas = _schemas()
+    expected_names = {
+        "capability-claim.schema.json",
+        "instruction-manifest.schema.json",
+        "target-identity.schema.json",
+    }
+    assert expected_names <= schemas.keys()
+    registry = _registry(schemas)
+    digest = "sha256:" + "2" * 64
+    capability = {
+        "adapter_id": "acg-git",
+        "adapter_version": "1",
+        "evidence_digest": digest,
+        "name": "git_immutable_objects",
+        "status": "proven",
+    }
+    path = {
+        "case_key_b64": None,
+        "encoding": "git-path-bytes",
+        "raw_b64": "QUdFTlRTLm1k",
+        "segment_offsets": [0],
+    }
+    positives = {
+        "capability-claim.schema.json": capability,
+        "instruction-manifest.schema.json": {
+            "files": [
+                {"blob_oid": "a" * 40, "byte_digest": digest, "path": path}
+            ]
+        },
+        "target-identity.schema.json": {
+            "adapter_id": "acg-git",
+            "adapter_version": "1",
+            "capabilities": [capability],
+            "filesystem_id": "posix:darwin",
+            "git_object_manifest_digest": digest,
+            "head_oid": "a" * 40,
+            "ignore_provenance_digest": digest,
+            "index_manifest_digest": digest,
+            "inventory_digest": digest,
+            "physical_root_fingerprint": digest,
+            "platform_id": "darwin",
+            "sanitized_remote_identity_digest": None,
+            "status_digest": digest,
+            "tree_oid": "b" * 40,
+            "worktree_manifest_digest": digest,
+        },
+    }
+    for name, positive in positives.items():
+        validator = Draft202012Validator(schemas[name], registry=registry)
+        validator.validate(positive)
+        with pytest.raises(ValidationError):
+            validator.validate({**positive, "unexpected": True})

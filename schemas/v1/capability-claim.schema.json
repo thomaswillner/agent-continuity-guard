@@ -1,0 +1,39 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/capability-claim.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "adapter_id": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]*$",
+      "type": "string"
+    },
+    "adapter_version": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]*$",
+      "type": "string"
+    },
+    "evidence_digest": {
+      "anyOf": [
+        {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+        {"type": "null"}
+      ]
+    },
+    "name": {
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "type": "string"
+    },
+    "status": {"enum": ["proven", "unsupported", "unknown"]}
+  },
+  "required": [
+    "adapter_id",
+    "adapter_version",
+    "evidence_digest",
+    "name",
+    "status"
+  ],
+  "title": "CapabilityClaim/v1",
+  "type": "object",
+  "x-record-type": "CapabilityClaim/v1"
+}

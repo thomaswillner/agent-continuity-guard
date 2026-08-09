@@ -31,7 +31,21 @@ def _load() -> dict[str, dict[str, Any]]:
 
 def _goldens() -> dict[str, dict[str, Any]]:
     digest = "sha256:" + "1" * 64
+    capability = {
+        "adapter_id": "acg-git",
+        "adapter_version": "1",
+        "evidence_digest": digest,
+        "name": "git_immutable_objects",
+        "status": "proven",
+    }
+    path = {
+        "case_key_b64": None,
+        "encoding": "git-path-bytes",
+        "raw_b64": "QUdFTlRTLm1k",
+        "segment_offsets": [0],
+    }
     return {
+        "capability-claim.schema.json": capability,
         "evaluation-result.schema.json": {
             "findings": [],
             "schema": "EvaluationResult/v1",
@@ -47,6 +61,11 @@ def _goldens() -> dict[str, dict[str, Any]]:
             "subject_id": digest,
             "verdict": "unknown",
         },
+        "instruction-manifest.schema.json": {
+            "files": [
+                {"blob_oid": "a" * 40, "byte_digest": digest, "path": path}
+            ]
+        },
         "path-identity.schema.json": {
             "case_key_b64": None,
             "encoding": "posix-bytes",
@@ -58,6 +77,23 @@ def _goldens() -> dict[str, dict[str, Any]]:
             "digest": digest,
             "name": "acg-git",
             "version": "1.0",
+        },
+        "target-identity.schema.json": {
+            "adapter_id": "acg-git",
+            "adapter_version": "1",
+            "capabilities": [capability],
+            "filesystem_id": "posix:darwin",
+            "git_object_manifest_digest": digest,
+            "head_oid": "a" * 40,
+            "ignore_provenance_digest": digest,
+            "index_manifest_digest": digest,
+            "inventory_digest": digest,
+            "physical_root_fingerprint": digest,
+            "platform_id": "darwin",
+            "sanitized_remote_identity_digest": None,
+            "status_digest": digest,
+            "tree_oid": "b" * 40,
+            "worktree_manifest_digest": digest,
         },
     }
 

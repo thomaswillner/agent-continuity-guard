@@ -1,0 +1,141 @@
+"""Read-only capture contracts."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from agent_continuity.kernel.canonical import CanonicalJSONError, digest_bytes
+from agent_continuity.kernel.capabilities import (
+    CapabilityClaimV1,
+    capability_payload,
+)
+from agent_continuity.kernel.model import Digest, JsonObject, StoredRecord
+from agent_continuity.kernel.paths import PathIdentityV1, path_identity_payload
+from agent_continuity.kernel.records import make_record, require_digest
+
+_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+class CaptureError(RuntimeError):
+    """Base class for sanitized capture failures."""
+
+
+class CaptureRequestError(CaptureError):
+    """Caller supplied an invalid target or capture request."""
+
+
+class CaptureUnknownError(CaptureError):
+    """Required target proof could not be established."""
+
+
+@dataclass(frozen=True, slots=True)
+class TargetIdentityV1:
+    adapter_id: str
+    adapter_version: str
+    sanitized_remote_identity_digest: Digest | None
+    head_oid: str
+    tree_oid: str
+    index_manifest_digest: Digest
+    worktree_manifest_digest: Digest
+    inventory_digest: Digest
+    status_digest: Digest
+    git_object_manifest_digest: Digest
+    ignore_provenance_digest: Digest
+    platform_id: str
+    filesystem_id: str
+    physical_root_fingerprint: Digest
+    capabilities: tuple[CapabilityClaimV1, ...]
+
+    def __post_init__(self) -> None:
+        if _OID_RE.fullmatch(self.head_oid) is None:
+            raise CanonicalJSONError("target HEAD object ID is invalid")
+        if _OID_RE.fullmatch(self.tree_oid) is None:
+            raise CanonicalJSONError("target tree object ID is invalid")
+        for value in (
+            self.index_manifest_digest,
+            self.worktree_manifest_digest,
+            self.inventory_digest,
+            self.status_digest,
+            self.git_object_manifest_digest,
+            self.ignore_provenance_digest,
+            self.physical_root_fingerprint,
+        ):
+            require_digest(value)
+        if self.sanitized_remote_identity_digest is not None:
+            require_digest(self.sanitized_remote_identity_digest)
+        ordered = tuple(sorted(self.capabilities, key=lambda item: item.name))
+        if self.capabilities != ordered:
+            raise CanonicalJSONError("capability claims must be ordered by name")
+        if len({item.name for item in self.capabilities}) != len(self.capabilities):
+            raise CanonicalJSONError("capability claim names must be unique")
+
+    @property
+    def is_clean(self) -> bool:
+        return self.status_digest == digest_bytes(b"")
+
+    def record(self) -> StoredRecord:
+        return make_record("TargetIdentity", target_identity_payload(self))
+
+
+@dataclass(frozen=True, slots=True)
+class InstructionFileV1:
+    path: PathIdentityV1
+    blob_oid: str
+    byte_digest: Digest
+
+    def __post_init__(self) -> None:
+        if _OID_RE.fullmatch(self.blob_oid) is None:
+            raise CanonicalJSONError("instruction blob object ID is invalid")
+        require_digest(self.byte_digest)
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureSnapshot:
+    target: TargetIdentityV1
+    instructions: tuple[InstructionFileV1, ...]
+
+    def instruction_record(self) -> StoredRecord:
+        return make_record(
+            "InstructionManifest", instruction_manifest_payload(self.instructions)
+        )
+
+
+class TargetAdapter(Protocol):
+    def capture(self, instruction_paths: Sequence[bytes]) -> CaptureSnapshot: ...
+
+
+def target_identity_payload(target: TargetIdentityV1) -> JsonObject:
+    return {
+        "adapter_id": target.adapter_id,
+        "adapter_version": target.adapter_version,
+        "capabilities": [capability_payload(item) for item in target.capabilities],
+        "filesystem_id": target.filesystem_id,
+        "git_object_manifest_digest": target.git_object_manifest_digest,
+        "head_oid": target.head_oid,
+        "ignore_provenance_digest": target.ignore_provenance_digest,
+        "index_manifest_digest": target.index_manifest_digest,
+        "inventory_digest": target.inventory_digest,
+        "physical_root_fingerprint": target.physical_root_fingerprint,
+        "platform_id": target.platform_id,
+        "sanitized_remote_identity_digest": target.sanitized_remote_identity_digest,
+        "status_digest": target.status_digest,
+        "tree_oid": target.tree_oid,
+        "worktree_manifest_digest": target.worktree_manifest_digest,
+    }
+
+
+def instruction_file_payload(value: InstructionFileV1) -> JsonObject:
+    return {
+        "blob_oid": value.blob_oid,
+        "byte_digest": value.byte_digest,
+        "path": path_identity_payload(value.path),
+    }
+
+
+def instruction_manifest_payload(
+    instructions: tuple[InstructionFileV1, ...],
+) -> JsonObject:
+    return {"files": [instruction_file_payload(item) for item in instructions]}

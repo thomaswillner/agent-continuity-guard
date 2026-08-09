@@ -1,0 +1,32 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/instruction-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "instruction-file": {
+      "additionalProperties": false,
+      "properties": {
+        "blob_oid": {
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+          "type": "string"
+        },
+        "byte_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "https://agent-continuity-guard.dev/schemas/v1/path-identity.schema.json"
+        }
+      },
+      "required": ["blob_oid", "byte_digest", "path"],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "files": {"items": {"$ref": "#/$defs/instruction-file"}, "type": "array"}
+  },
+  "required": ["files"],
+  "title": "InstructionManifest/v1",
+  "type": "object",
+  "x-record-type": "InstructionManifest/v1"
+}
