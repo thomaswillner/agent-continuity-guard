@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 7,
+  "revision": 8,
   "contract": {
     "revision": 1,
     "goal": {
@@ -64,7 +64,8 @@
       "Plan 1 Tasks 1 through 3 are implemented in commits b9da47d, 6fb64a3, and 0996f2c. Task 1 review passed; Task 2 and Task 3 remain behind independent review and remediation gates.",
       "Task 2 independent review failed with five high, three medium, and one low finding. Fix round 1 is bounded to strict runtime records, path semantics, deterministic ordering, deep immutability, and canonical verifier errors.",
       "Task 2 fix round 1 is implemented at 1373ad6 with maker-reported focused and full GREEN evidence; independent re-review remains pending, so the task is not accepted.",
-      "Mechanical runtime enforcement is not active for repository construction: current execution uses this persisted contract, explicit ownership, immutable commit ranges, and manual admission until typed state, policy, writeback, and budget controls are behaviorally available."
+      "Mechanical runtime enforcement is not active for repository construction: current execution uses this persisted contract, explicit ownership, immutable commit ranges, and manual admission until typed state, policy, writeback, and budget controls are behaviorally available.",
+      "Controller re-review reproduced one remaining Task 2 scope-boundary defect: a target-root TREE scope accepted an arbitrary non-PathIdentityV1 candidate because the root fast-path preceded candidate validation."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -122,16 +123,16 @@
       "implementation_plan_tasks": 38
     },
     "used": {
-      "retries_per_failure_fingerprint": 1,
+      "retries_per_failure_fingerprint": 2,
       "implementation_plan_tasks": 3
     }
   },
   "failure_fingerprint": {
-    "gate": "plan1.task2.independent_review",
-    "symptom": "Strict record and path behaviors do not satisfy the Task 2 contract under adversarial runtime values.",
-    "evidence_signature": "sha256:d8b7751666c495f0f58eb66576b48b39e22e5df609301a1537a801c88844b4b6",
-    "hypothesis": "Exact runtime type checks, total canonical ordering, trusted case-key domains, UTF-16 byte segmentation, deep immutable parameters, and complete verifier error normalization close the review findings."
+    "gate": "plan1.task2.root_candidate_validation",
+    "symptom": "PathScopeV1(path=None, TREE).contains(object()) returns true for a non-canonical candidate.",
+    "evidence_signature": "sha256:5bc98db2f72ad1c5105b76640d855b4ae3c3812af7614cfb1449d682507242ed",
+    "hypothesis": "Validating the candidate as an exact PathIdentityV1 before the root fast-path closes the remaining scope-boundary bypass without changing valid root containment."
   },
-  "next_action": "Close Task 2 and Task 3 independent review findings with RED/GREEN fix commits before starting Plan 1 Task 4.",
+  "next_action": "Complete bounded Task 2 fix round 2 and independent re-review, and close Task 3 review findings before starting Plan 1 Task 4.",
   "verdict": "IN_PROGRESS"
 }
