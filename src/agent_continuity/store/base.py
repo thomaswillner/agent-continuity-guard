@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 from agent_continuity.kernel.audit import AuditAnchorV1, AuditVerification
 from agent_continuity.kernel.canonical import (
@@ -16,6 +16,7 @@ from agent_continuity.kernel.canonical import (
 from agent_continuity.kernel.model import (
     Digest,
     JsonObject,
+    JsonValue,
     LogicalTime,
     RecordId,
     StoredRecord,
@@ -23,6 +24,23 @@ from agent_continuity.kernel.model import (
 from agent_continuity.kernel.records import require_digest, require_public_component
 
 _HEAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_MAX_AUDIT_DETAIL_DEPTH = 8
+_MAX_AUDIT_DETAIL_ITEMS = 64
+_AUDIT_DETAIL_KEYS = frozenset(
+    {
+        "code",
+        "count",
+        "digest",
+        "digests",
+        "flag",
+        "items",
+        "logical_time",
+        "record_id",
+        "record_ids",
+        "sequence",
+        "status",
+    }
+)
 
 
 class StateStoreError(RuntimeError):
@@ -42,6 +60,84 @@ class StoreIntegrityError(StateStoreError):
 
 
 FaultInjector = Callable[[str], None]
+
+
+def _normalize_audit_details(value: object, *, depth: int = 0) -> JsonObject:
+    if depth > _MAX_AUDIT_DETAIL_DEPTH:
+        raise StoreValidationError("audit details exceed maximum depth")
+    if type(value) is not dict:
+        raise StoreValidationError("audit details must be an exact JSON object")
+    if len(value) > _MAX_AUDIT_DETAIL_ITEMS:
+        raise StoreValidationError("audit detail object is too large")
+    unknown = set(value).difference(_AUDIT_DETAIL_KEYS)
+    if unknown:
+        raise StoreValidationError("audit detail key is not in the public vocabulary")
+    normalized: JsonObject = {}
+    for key in sorted(value):
+        item = value[key]
+        if key in {"digest", "record_id"}:
+            if type(item) is not str:
+                raise StoreValidationError("audit detail digest is invalid")
+            try:
+                require_digest(item)
+            except ValueError as error:
+                raise StoreValidationError("audit detail digest is invalid") from error
+            normalized[key] = item
+        elif key in {"digests", "record_ids"}:
+            if type(item) is not list or len(item) > _MAX_AUDIT_DETAIL_ITEMS:
+                raise StoreValidationError("audit detail digest list is invalid")
+            identities: list[str] = []
+            for identity in item:
+                if type(identity) is not str:
+                    raise StoreValidationError("audit detail digest is invalid")
+                try:
+                    require_digest(identity)
+                except ValueError as error:
+                    raise StoreValidationError(
+                        "audit detail digest is invalid"
+                    ) from error
+                identities.append(identity)
+            if len(identities) != len(set(identities)):
+                raise StoreValidationError("audit detail digests must be unique")
+            normalized[key] = cast(JsonValue, sorted(identities))
+        elif key in {"code", "status"}:
+            if type(item) is not str:
+                raise StoreValidationError("audit detail identifier is invalid")
+            try:
+                require_public_component(item, field=f"audit detail {key}")
+            except ValueError as error:
+                raise StoreValidationError(
+                    "audit detail identifier is invalid"
+                ) from error
+            normalized[key] = item
+        elif key == "logical_time":
+            if type(item) is not str:
+                raise StoreValidationError("audit detail logical time is invalid")
+            try:
+                normalized[key] = validate_logical_time(item)
+            except ValueError as error:
+                raise StoreValidationError(
+                    "audit detail logical time is invalid"
+                ) from error
+        elif key in {"count", "sequence"}:
+            if type(item) is not int or item < 0:
+                raise StoreValidationError("audit detail counter is invalid")
+            normalized[key] = item
+        elif key == "flag":
+            if type(item) is not bool:
+                raise StoreValidationError("audit detail flag is invalid")
+            normalized[key] = item
+        else:
+            if type(item) is not list or len(item) > _MAX_AUDIT_DETAIL_ITEMS:
+                raise StoreValidationError("audit detail items are invalid")
+            entries = [
+                _normalize_audit_details(entry, depth=depth + 1) for entry in item
+            ]
+            keyed = [(canonical_bytes(entry), entry) for entry in entries]
+            if len(keyed) != len({encoded for encoded, _entry in keyed}):
+                raise StoreValidationError("audit detail items must be unique")
+            normalized[key] = [entry for _encoded, entry in sorted(keyed)]
+    return normalized
 
 
 def require_record_id(value: RecordId, *, field: str) -> None:
@@ -109,7 +205,7 @@ class AuditEventDraft:
             raise StoreValidationError(
                 "audit details are not canonical JSON"
             ) from error
-        object.__setattr__(self, "details", snapshot)
+        object.__setattr__(self, "details", _normalize_audit_details(snapshot))
 
 
 @dataclass(frozen=True, slots=True)

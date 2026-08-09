@@ -16,18 +16,52 @@ class StatePathError(ValueError):
 class ExternalStateRoot:
     """Pinned owner-only state directory returned by atomic safe creation."""
 
-    __slots__ = ("dir_fd", "path")
+    __slots__ = (
+        "_git_fd",
+        "_git_identity",
+        "_git_path",
+        "_root_identity",
+        "_target_fd",
+        "_target_identity",
+        "_target_path",
+        "dir_fd",
+        "path",
+    )
 
-    def __init__(self, path: Path, dir_fd: int) -> None:
+    def __init__(
+        self,
+        path: Path,
+        dir_fd: int,
+        *,
+        target_path: Path,
+        target_fd: int,
+        git_path: Path | None,
+        git_fd: int,
+        _token: object,
+    ) -> None:
+        if _token is not _EXTERNAL_ROOT_TOKEN:
+            raise StatePathError("ExternalStateRoot must come from pinned creation")
         self.path = path
         self.dir_fd = dir_fd
+        self._root_identity = _identity(dir_fd)
+        self._target_path = target_path
+        self._target_fd = target_fd
+        self._target_identity = _identity(target_fd)
+        self._git_path = git_path
+        self._git_fd = git_fd
+        self._git_identity = None if git_fd < 0 else _identity(git_fd)
 
     def close(self) -> None:
-        if self.dir_fd >= 0:
+        for attribute in ("dir_fd", "_git_fd", "_target_fd"):
+            descriptor = getattr(self, attribute, -1)
+            if descriptor < 0:
+                continue
             try:
-                os.close(self.dir_fd)
+                os.close(descriptor)
+            except OSError:
+                pass
             finally:
-                self.dir_fd = -1
+                setattr(self, attribute, -1)
 
     def __enter__(self) -> ExternalStateRoot:
         return self
@@ -37,6 +71,36 @@ class ExternalStateRoot:
 
     def __del__(self) -> None:
         self.close()
+
+    def _assert_live(self) -> None:
+        if self.dir_fd < 0 or self._target_fd < 0:
+            raise StatePathError("external state root is closed")
+        root_metadata = os.fstat(self.dir_fd)
+        if _identity(self.dir_fd) != self._root_identity:
+            raise StatePathError("state root descriptor identity changed")
+        if not stat.S_ISDIR(root_metadata.st_mode):
+            raise StatePathError("state root is not a directory")
+        if stat.S_IMODE(root_metadata.st_mode) != 0o700:
+            raise StatePathError("state root mode must be 0700")
+        if hasattr(os, "getuid") and root_metadata.st_uid != os.getuid():
+            raise StatePathError("state root owner is invalid")
+        if _locator_identity(self.path) != self._root_identity:
+            raise StatePathError("state root locator identity changed")
+        if _identity(self._target_fd) != self._target_identity:
+            raise StatePathError("target descriptor identity changed")
+        if _locator_identity(self._target_path) != self._target_identity:
+            raise StatePathError("target locator identity changed")
+        if self._git_path is not None:
+            if self._git_fd < 0 or self._git_identity is None:
+                raise StatePathError("Git descriptor is closed")
+            if _identity(self._git_fd) != self._git_identity:
+                raise StatePathError("Git descriptor identity changed")
+            if _locator_identity(self._git_path) != self._git_identity:
+                raise StatePathError("Git locator identity changed")
+        assert_external_state(self._target_path, self._git_path, self.path)
+
+
+_EXTERNAL_ROOT_TOKEN = object()
 
 
 def resolve_state_home(override: str | Path | None) -> Path:
@@ -108,11 +172,11 @@ def assert_external_state(
 
     target_real = _projected_real_path(target)
     state_real = _projected_real_path(state_home)
-    if _within(state_real, target_real):
+    if _within(state_real, target_real) or _within(target_real, state_real):
         raise StatePathError("state root overlaps target")
     if git_directory is not None:
         git_real = _projected_real_path(git_directory)
-        if _within(state_real, git_real):
+        if _within(state_real, git_real) or _within(git_real, state_real):
             raise StatePathError("state root overlaps Git directory")
 
 
@@ -170,6 +234,7 @@ def open_external_state_root(
     try:
         target_real = target.resolve(strict=True)
         git_real = None if git_directory is None else git_directory.resolve(strict=True)
+        state_real = _projected_real_path(state_home)
     except OSError as error:
         raise StatePathError("target identity could not be pinned") from error
     target_fd = _open_absolute_directory(target_real, create=False)
@@ -182,7 +247,7 @@ def open_external_state_root(
             git_identity = _identity(git_fd)
         else:
             git_identity = None
-        state_fd = _open_absolute_directory(state_home, create=True)
+        state_fd = _open_absolute_directory(state_real, create=True)
         state_identity = _identity(state_fd)
         if state_identity in {target_identity, git_identity}:
             raise StatePathError("state root resolves to guarded directory")
@@ -197,10 +262,20 @@ def open_external_state_root(
             raise StatePathError("target identity changed during state creation")
         if git_real is not None and _locator_identity(git_real) != git_identity:
             raise StatePathError("Git identity changed during state creation")
-        if _locator_identity(state_home) != state_identity:
+        if _locator_identity(state_real) != state_identity:
             raise StatePathError("state locator changed during state creation")
-        handle = ExternalStateRoot(state_home, state_fd)
+        handle = ExternalStateRoot(
+            state_real,
+            state_fd,
+            target_path=target_real,
+            target_fd=target_fd,
+            git_path=git_real,
+            git_fd=git_fd,
+            _token=_EXTERNAL_ROOT_TOKEN,
+        )
         state_fd = -1
+        target_fd = -1
+        git_fd = -1
         return handle
     except OSError as error:
         raise StatePathError("state-root identity could not be verified") from error

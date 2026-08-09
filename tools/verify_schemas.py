@@ -87,6 +87,37 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         raise SchemaVerificationError("invalid_golden")
 
 
+def schema_validator(
+    name: str,
+    schemas: dict[str, dict[str, Any]],
+) -> Draft202012Validator:
+    if name not in schemas:
+        raise SchemaVerificationError("unknown_schema")
+    try:
+        registry: Registry[Any] = Registry().with_resources(
+            [
+                (schema["$id"], Resource.from_contents(schema))
+                for schema in schemas.values()
+            ]
+        )
+    except Exception as error:
+        raise SchemaVerificationError("invalid_schema_metadata") from error
+    return Draft202012Validator(
+        schemas[name],
+        registry=registry,
+        format_checker=schema_format_checker(),
+    )
+
+
+def validate_schema_instance(
+    name: str,
+    instance: dict[str, Any],
+    schemas: dict[str, dict[str, Any]],
+) -> None:
+    schema_validator(name, schemas).validate(instance)
+    _semantic_validate(name, instance)
+
+
 def schema_goldens() -> dict[str, dict[str, Any]]:
     digest = "sha256:" + "1" * 64
     capability = {
@@ -199,24 +230,11 @@ def main() -> int:
     try:
         schemas = _load()
         _registered_schemas(schemas)
-        try:
-            registry: Registry[Any] = Registry().with_resources(
-                [
-                    (schema["$id"], Resource.from_contents(schema))
-                    for schema in schemas.values()
-                ]
-            )
-        except Exception as error:
-            raise SchemaVerificationError("invalid_schema_metadata") from error
         goldens = schema_goldens()
         if set(goldens) != set(schemas):
             raise SchemaVerificationError("golden_coverage_mismatch")
         for name, positive in goldens.items():
-            validator = Draft202012Validator(
-                schemas[name],
-                registry=registry,
-                format_checker=schema_format_checker(),
-            )
+            validator = schema_validator(name, schemas)
             try:
                 validator.validate(positive)
                 _semantic_validate(name, positive)

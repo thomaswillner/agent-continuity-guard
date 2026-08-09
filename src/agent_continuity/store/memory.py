@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from .base import FaultInjector
 from .sqlite import SQLiteStateStore
 
@@ -17,8 +15,7 @@ class MemoryStateStore(SQLiteStateStore):
         store_id: str,
         fault_injector: FaultInjector | None = None,
     ) -> None:
-        super().__init__(
-            Path(":memory:"),
+        self._initialize_memory_store(
             store_id=store_id,
             fault_injector=fault_injector,
         )

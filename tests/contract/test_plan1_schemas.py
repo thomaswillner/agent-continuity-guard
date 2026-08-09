@@ -13,6 +13,7 @@ from agent_continuity.kernel.canonical import (
     CanonicalJSONError,
     canonical_bytes,
     digest_bytes,
+    validate_logical_time,
 )
 from agent_continuity.kernel.capabilities import CapabilityClaimV1
 from tools import verify_schemas
@@ -169,29 +170,155 @@ def test_capture_schemas_accept_strict_golden_records() -> None:
 
 
 @pytest.mark.parametrize(
-    ("schema_name", "field_name"),
+    ("schema_name", "field_name", "invalid_time"),
     [
-        ("audit-anchor.schema.json", "created_at"),
-        ("audit-event.schema.json", "logical_time"),
+        ("audit-anchor.schema.json", "created_at", "0000-01-01T00:00:00Z"),
+        ("audit-anchor.schema.json", "created_at", "2026-00-01T00:00:00Z"),
+        ("audit-anchor.schema.json", "created_at", "2026-13-01T00:00:00Z"),
+        ("audit-event.schema.json", "logical_time", "2026-04-31T00:00:00Z"),
+        ("audit-event.schema.json", "logical_time", "2025-02-29T00:00:00Z"),
+        ("audit-event.schema.json", "logical_time", "1900-02-29T00:00:00Z"),
+        ("audit-event.schema.json", "logical_time", "2026-01-01T24:00:00Z"),
     ],
 )
 def test_audit_time_schemas_reject_impossible_calendar_dates(
     schema_name: str,
     field_name: str,
+    invalid_time: str,
 ) -> None:
     schemas = _schemas()
     validator = Draft202012Validator(
         schemas[schema_name],
         registry=_registry(schemas),
-        format_checker=verify_schemas.schema_format_checker(),
     )
     invalid = {
         **verify_schemas.schema_goldens()[schema_name],
-        field_name: "2026-99-99T12:00:00Z",
+        field_name: invalid_time,
     }
 
     with pytest.raises(ValidationError):
         validator.validate(invalid)
+
+
+def test_default_validator_logical_time_matches_runtime_gregorian_calendar() -> None:
+    schemas = _schemas()
+    schema_name = "audit-anchor.schema.json"
+    validator = Draft202012Validator(
+        schemas[schema_name], registry=_registry(schemas)
+    )
+    golden = verify_schemas.schema_goldens()[schema_name]
+    candidates = [f"{year:04}-02-29T12:00:00Z" for year in range(1, 10_000)]
+    candidates.extend(
+        f"{year:04}-{month:02}-{day:02}T12:00:00Z"
+        for year in (1900, 2000, 2025, 2026)
+        for month in range(0, 14)
+        for day in range(0, 33)
+    )
+
+    for candidate in candidates:
+        try:
+            validate_logical_time(candidate)
+        except CanonicalJSONError:
+            runtime_valid = False
+        else:
+            runtime_valid = True
+        schema_valid = validator.is_valid({**golden, "created_at": candidate})
+        assert schema_valid is runtime_valid, candidate
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "mutation"),
+    [
+        ("audit-event.schema.json", {"details": {"raw": "narrative"}}),
+        (
+            "audit-event.schema.json",
+            {"details": {"prompt": "sha256:" + "1" * 64}},
+        ),
+        ("audit-event.schema.json", {"details": {"count": 1.5}}),
+        ("audit-event.schema.json", {"details": {"code": "bad\ncode"}}),
+        (
+            "audit-event.schema.json",
+            {
+                "details": {
+                    "digests": [
+                        "sha256:" + "1" * 64,
+                        "sha256:" + "1" * 64,
+                    ]
+                }
+            },
+        ),
+        ("audit-anchor.schema.json", {"label": "bad\nlabel"}),
+        (
+            "audit-event.schema.json",
+            {
+                "record_ids": [
+                    "sha256:" + "1" * 64,
+                    "sha256:" + "1" * 64,
+                ]
+            },
+        ),
+        (
+            "audit-event.schema.json",
+            {
+                "local_values": [
+                    {"digest": "sha256:" + "1" * 64, "kind": "goal_text"},
+                    {"digest": "sha256:" + "1" * 64, "kind": "goal_text"},
+                ]
+            },
+        ),
+        (
+            "audit-event.schema.json",
+            {
+                "head_updates": [
+                    {
+                        "expected": None,
+                        "name": "head:a",
+                        "new_record_id": "sha256:" + "1" * 64,
+                    },
+                    {
+                        "expected": None,
+                        "name": "head:a",
+                        "new_record_id": "sha256:" + "1" * 64,
+                    },
+                ]
+            },
+        ),
+    ],
+)
+def test_public_schema_validator_matches_runtime_contract(
+    schema_name: str,
+    mutation: dict[str, Any],
+) -> None:
+    schemas = _schemas()
+    invalid = {**verify_schemas.schema_goldens()[schema_name], **mutation}
+
+    validator = Draft202012Validator(
+        schemas[schema_name], registry=_registry(schemas)
+    )
+
+    with pytest.raises(ValidationError):
+        validator.validate(invalid)
+
+
+def test_audit_schema_accepts_unsorted_unique_collections_for_runtime_normalization(
+) -> None:
+    schemas = _schemas()
+    validator = Draft202012Validator(
+        schemas["audit-event.schema.json"], registry=_registry(schemas)
+    )
+    digest_a = "sha256:" + "1" * 64
+    digest_b = "sha256:" + "2" * 64
+    instance = {
+        **verify_schemas.schema_goldens()["audit-event.schema.json"],
+        "head_updates": [
+            {"expected": None, "name": "head:b", "new_record_id": digest_b},
+            {"expected": None, "name": "head:a", "new_record_id": digest_a},
+        ],
+        "inserted_record_ids": [digest_b, digest_a],
+        "record_ids": [digest_b, digest_a],
+    }
+
+    validator.validate(instance)
 
 
 def test_capture_goldens_have_complete_independent_tool_parity() -> None:

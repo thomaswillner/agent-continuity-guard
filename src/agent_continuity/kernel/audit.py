@@ -12,8 +12,9 @@ from .records import require_digest, require_public_component
 def _normalized_optional_label(value: str | None) -> str | None:
     if value is None:
         return None
-    if type(value) is not str or not 1 <= len(value) <= 128:
-        raise ValueError("audit anchor label must contain 1 to 128 characters")
+    if type(value) is not str:
+        raise ValueError("audit anchor label must be exact text")
+    require_public_component(value, field="audit anchor label")
     normalized = canonical_loads(canonical_bytes({"label": value}))["label"]
     if type(normalized) is not str:
         raise ValueError("audit anchor label is invalid")

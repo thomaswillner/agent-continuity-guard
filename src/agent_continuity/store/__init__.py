@@ -1,5 +1,7 @@
 """External Agent Continuity Guard state contracts and adapters."""
 
+from agent_continuity.kernel.audit import AuditAnchorV1, AuditVerification
+
 from .base import (
     AuditEventDraft,
     AuditHeadState,
@@ -19,8 +21,10 @@ from .paths import ExternalStateRoot, open_external_state_root, resolve_state_ho
 from .sqlite import SQLiteStateStore
 
 __all__ = [
+    "AuditAnchorV1",
     "AuditEventDraft",
     "AuditHeadState",
+    "AuditVerification",
     "CommitReceipt",
     "ExternalStateRoot",
     "HeadState",

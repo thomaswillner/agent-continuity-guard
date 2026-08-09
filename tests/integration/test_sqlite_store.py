@@ -11,17 +11,18 @@ import pytest
 from agent_continuity.kernel.canonical import digest_bytes, validate_logical_time
 from agent_continuity.kernel.model import RecordId, StoredRecord
 from agent_continuity.kernel.records import make_record
-from agent_continuity.store.base import (
+from agent_continuity.store import (
     AuditEventDraft,
     HeadState,
     HeadUpdate,
+    MemoryStateStore,
     SensitiveLocalValueDraft,
+    SQLiteStateStore,
     StoreConflictError,
     StoreIntegrityError,
     StoreValidationError,
 )
-from agent_continuity.store.memory import MemoryStateStore
-from agent_continuity.store.sqlite import SQLiteStateStore
+from tests.helpers.state_store import open_test_store
 
 LOGICAL_TIME = validate_logical_time("2026-08-09T12:00:00Z")
 
@@ -46,7 +47,7 @@ def _open_store(
     *,
     fault_injector: Any = None,
 ) -> SQLiteStateStore:
-    return SQLiteStateStore(
+    return open_test_store(
         path,
         store_id="store-test",
         fault_injector=fault_injector,
@@ -86,7 +87,7 @@ def test_genesis_commit_persists_only_approved_typed_local_values(
         receipt = store.commit(
             records=(record,),
             local_values=drafts,
-            event=_event(record.record_id, {"local_digest": local_digest}),
+            event=_event(record.record_id, {"digest": local_digest}),
             head_name="session:test:checkpoint",
             expected_head=None,
             new_head_id=record.record_id,
@@ -172,6 +173,64 @@ def test_invalid_audit_logical_time_is_rejected_at_draft_boundary() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"raw": "caller narrative"},
+        {"prompt": digest_bytes(b"prompt")},
+        {"items": [{"source": digest_bytes(b"source")}]},
+        {"authorization": "secret-value"},
+        {"count": 1.5},
+        {"code": "bad\ncode"},
+    ],
+)
+def test_audit_details_reject_unclassified_string_bytes(
+    details: dict[str, Any],
+) -> None:
+    record = _record("private-details")
+
+    with pytest.raises(StoreValidationError):
+        _event(record.record_id, details)
+
+
+def test_public_collections_reject_duplicate_identities_before_transaction(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    record = _record("duplicate")
+    local = SensitiveLocalValueDraft(
+        digest=digest_bytes(b"goal"),
+        kind="goal_text",
+        value=b"goal",
+        caller_approved=True,
+    )
+    with pytest.raises(StoreValidationError):
+        _event(
+            record.record_id,
+            {"digests": [record.record_id, record.record_id]},
+        )
+
+    with _open_store(path) as store:
+        with pytest.raises(StoreValidationError):
+            store.commit(
+                records=(record, record),
+                event=_event(record.record_id),
+                head_name="checkpoint",
+                expected_head=None,
+                new_head_id=record.record_id,
+            )
+        with pytest.raises(StoreValidationError):
+            store.commit(
+                records=(record,),
+                local_values=(local, local),
+                event=_event(record.record_id),
+                head_name="checkpoint",
+                expected_head=None,
+                new_head_id=record.record_id,
+            )
+        assert store.read_audit_head() is None
+
+
 def test_missing_audit_subject_rolls_back_before_commit(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite3"
     record = _record("present")
@@ -198,9 +257,11 @@ def test_atomic_multi_head_commit_returns_ordered_immutable_receipt(
     path = tmp_path / "state.sqlite3"
     first = _record("first")
     second = _record("second")
-    caller_details: dict[str, Any] = {"nested": {"items": ["before"]}}
+    before_digest = digest_bytes(b"before")
+    after_digest = digest_bytes(b"after")
+    caller_details: dict[str, Any] = {"items": [{"digest": before_digest}]}
     event = _event(first.record_id, caller_details)
-    caller_details["nested"] = {"items": ["after"]}
+    caller_details["items"] = [{"digest": after_digest}]
 
     with _open_store(path) as store:
         receipt = store.commit_many(
@@ -233,28 +294,16 @@ def test_atomic_multi_head_commit_returns_ordered_immutable_receipt(
         ).fetchone()
     assert row is not None
     payload = json.loads(bytes(row[0]))
-    assert payload["details"] == {"nested": {"items": ["before"]}}
+    assert payload["details"] == {"items": [{"digest": before_digest}]}
 
 
-@pytest.mark.parametrize(
-    "updates",
-    [
-        (
-            HeadUpdate("head:a", None, RecordId("sha256:" + "1" * 64)),
-            HeadUpdate("head:a", None, RecordId("sha256:" + "2" * 64)),
-        ),
-        (
-            HeadUpdate("head:b", None, RecordId("sha256:" + "1" * 64)),
-            HeadUpdate("head:a", None, RecordId("sha256:" + "2" * 64)),
-        ),
-    ],
-)
-def test_head_update_names_must_be_unique_and_canonically_ordered(
-    tmp_path: Path,
-    updates: tuple[HeadUpdate, HeadUpdate],
-) -> None:
+def test_duplicate_head_update_names_are_rejected(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite3"
     record = _record("value")
+    updates = (
+        HeadUpdate("head:a", None, RecordId("sha256:" + "1" * 64)),
+        HeadUpdate("head:a", None, RecordId("sha256:" + "2" * 64)),
+    )
 
     with _open_store(path) as store:
         with pytest.raises(StoreValidationError):
@@ -264,6 +313,46 @@ def test_head_update_names_must_be_unique_and_canonically_ordered(
                 head_updates=updates,
             )
         assert store.read_audit_head() is None
+
+
+def test_unsorted_public_collections_are_normalized_before_identity(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    first = _record("first")
+    second = _record("second")
+    details = {
+        "digests": [second.record_id, first.record_id],
+        "items": [
+            {"record_id": second.record_id},
+            {"record_id": first.record_id},
+        ],
+    }
+
+    with _open_store(path) as store:
+        receipt = store.commit_many(
+            records=(second, first),
+            event=_event(first.record_id, details),
+            head_updates=(
+                HeadUpdate("head:b", None, second.record_id),
+                HeadUpdate("head:a", None, first.record_id),
+            ),
+        )
+
+    assert tuple(name for name, _head in receipt.heads) == ("head:a", "head:b")
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            "SELECT canonical_bytes FROM audit_events WHERE sequence = 1"
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(bytes(row[0]))
+    assert payload["details"] == {
+        "digests": sorted((first.record_id, second.record_id)),
+        "items": [
+            {"record_id": first.record_id},
+            {"record_id": second.record_id},
+        ],
+    }
 
 
 def test_stale_multi_head_cas_and_missing_new_record_are_atomic(tmp_path: Path) -> None:
@@ -499,8 +588,10 @@ def test_store_reopen_rehashes_records_and_rejects_schema_drift(tmp_path: Path) 
         connection.execute(
             "UPDATE metadata SET value = ? WHERE key = 'schema_version'", (b"2",)
         )
+    unsupported_bytes = path.read_bytes()
     with pytest.raises(StoreIntegrityError):
         _open_store(path)
+    assert path.read_bytes() == unsupported_bytes
 
 
 @pytest.mark.parametrize("operation", ["UPDATE", "DELETE"])
