@@ -25,8 +25,9 @@
 - Automatic handoff is permitted only when a provider adapter proves current behavioral support for usage telemetry, destination-session creation, handoff injection, source-continuation blocking, destination-projection collection, source close/archive, and rollback to the source when acceptance fails. Missing capability yields warning plus manual handoff, never simulated automation.
 - No automatic `/compact`, session restart, message deletion, transcript rewriting, or hook installation occurs. ACG returns the required action and transition permission to the caller.
 - Exact replay is idempotent. Reusing a transition or projection identifier with different canonical bytes is BLOCK.
-- Default context policy is `conservative-longrun-v1`: checkpoint at 50% rendered use or 80,000 cumulative tokens, compaction/handoff required at 65% rendered use or 120,000 cumulative tokens, protected continuation refused at 75% rendered use or 160,000 cumulative tokens, minimum 8,192-token reserve, metric age at most 120 seconds, no more than 8 turns since the last verified checkpoint, maximum scope depth 8, and maximum 3 distinct rehydration attempts. The effective action is the strongest action produced by the earliest ratio, absolute ceiling, reserve, turn, probe, or freshness gate.
-- The 50%/65%/75% ratios and 80,000/120,000/160,000 absolute ceilings are operational seed defaults with exact status `PROVISIONAL_UNCALIBRATED`. They require a frozen provider/model/route/harness/workload/tool-schema/transition profile and behavioral calibration before any production safety claim. They are not universal empirical breakpoints; `200,000` is not treated as a cross-model safety boundary.
+- Default context policy is `conservative-longrun-v2`: checkpoint at 25% rendered use or 16,000 cumulative tokens, compaction/handoff required at 40% rendered use or 24,000 cumulative tokens, protected continuation refused at 50% rendered use or 32,000 cumulative tokens, minimum 8,192-token reserve, metric age at most 120 seconds, no more than 8 turns since the last verified checkpoint, maximum scope depth 8, and maximum 3 distinct rehydration attempts. The effective action is the strongest action produced by the earliest ratio, absolute ceiling, reserve, turn, probe, or freshness gate.
+- The 25%/40%/50% ratios and 16,000/24,000/32,000 absolute ceilings are operator-selected conservative defaults with exact status `PROVISIONAL_UNCALIBRATED`. Checkpoint and handoff occur before the 32K degradation region reported for difficult long-context workloads; 32K is a refusal ceiling, not a claimed universal break point. The values require a frozen provider/model/route/harness/workload/tool-schema/transition profile and behavioral calibration before any production safety claim. `200,000` is not treated as a cross-model safety boundary.
+- Built-in default generation `2` and all six v2 thresholds are update invariants. Every source update, installed-artifact update, migration, CI aggregate, and release-candidate gate must reproduce the exact canonical v2 default and fail closed if a missing or higher built-in value is observed. Updates append a new policy/default-generation binding rather than mutating historical policy records. An active session bound to retired `conservative-longrun-v1`, a missing default, or a silently raised built-in threshold cannot continue protected work; its next observation requires checkpoint plus compact/handoff into v2 or returns BLOCK. Explicit custom profiles with equal or lower thresholds remain valid. An update may never silently convert an explicit calibrated profile into the built-in default or raise v2; a later higher default requires a new explicit operator amendment and current calibration evidence.
 - Thresholds use integer basis points and integer tokens. Floats are forbidden.
 - Deterministic continuity probes run at bounded cadence even below budget thresholds. The agent must return requested canonical record IDs through a structured adapter result; missing protected IDs, contradictions against canonical records, unknown substitutions, or authority broadening require handoff or BLOCK. Confidence, prose acknowledgment, and self-reported recall never pass a probe.
 - Task-phase boundaries, high-risk decisions, explicit operator requests, and large tool-output spikes may request an earlier checkpoint or handoff. These event triggers can strengthen but never postpone the action selected by token, reserve, turn, freshness, or probe gates.
@@ -39,6 +40,7 @@
 ## File Map
 
 - `src/agent_continuity/kernel/context.py`: immutable context policy, metrics, phase, projection, retention, comparison, and verdict models.
+- `src/agent_continuity/kernel/context_defaults.py`: versioned conservative v2 defaults and append-only update/migration decision.
 - `src/agent_continuity/kernel/context_evaluation.py`: pure budget and continuity comparison rules.
 - `src/agent_continuity/context/coordinator.py`: transition preparation and post-transition orchestration over stable ACG observations.
 - `src/agent_continuity/context/__init__.py`: public context package exports.
@@ -65,9 +67,11 @@
 - `tests/contract/`: canonical schema, identity, ordering, and decision-table tests.
 - `tests/integration/`: prepare, rehydrate, compare, resume, handoff, and atomicity tests.
 - `tests/property/`: projection-set, scope-graph, and replay properties.
+- `tests/golden/context-default-policy-v2.json`: canonical update-pinned default values.
 - `tests/security/`: poisoning, authority broadening, omission, collision, and target-read-only proof.
 - `tests/fixtures/context-continuity-benchmark-v1.jsonl`: frozen synthetic failure/control corpus.
 - `tools/benchmark_context_continuity.py`: deterministic detection and false-positive scorer.
+- `tools/verify_context_defaults.py`: installed/source default parity and anti-regression gate.
 - `docs/context-continuity.md`: generic harness contract and evidence boundary.
 
 ## Requirement Coverage
@@ -96,6 +100,7 @@
 **Files:**
 
 - Create: `src/agent_continuity/kernel/context.py`
+- Create: `src/agent_continuity/kernel/context_defaults.py`
 - Modify: `src/agent_continuity/kernel/records.py`
 - Create: `schemas/v1/context-budget-policy.schema.json`
 - Create: `schemas/v1/context-metrics.schema.json`
@@ -103,6 +108,9 @@
 - Create: `tests/contract/test_context_metrics.py`
 - Create: `tests/contract/test_context_budget_decision.py`
 - Create: `tests/property/test_context_thresholds.py`
+- Create: `tests/contract/test_context_default_update.py`
+- Create: `tests/golden/context-default-policy-v2.json`
+- Create: `tools/verify_context_defaults.py`
 
 **Interfaces:**
 
@@ -188,7 +196,9 @@ def evaluate_context_budget(
 
 - [ ] **Step 1: Write failing canonical policy and metric tests**
 
-Require `0 < checkpoint_at_bps < compact_at_bps < block_at_bps <= 10000`, `0 < checkpoint_ceiling_tokens < compact_ceiling_tokens < block_ceiling_tokens`, a canonical profile-identity digest, positive rendered capacity, rendered `0 <= used_tokens_upper_bound <= capacity`, nonnegative cumulative upper bound, compaction generation, and turn count, registered deterministic producer identity, canonical field order, stable golden bytes, and no unknown fields or floats. The profile identity digest binds provider, exact model/version, route, harness build, system and compaction prompt digests, usage-source identity, tool-schema-set digest, workload class, and transition mechanism without storing secret values. `INCOMPLETE` and `UNAVAILABLE` counters require `used_tokens_upper_bound=None`; COMPLETE and ESTIMATED_UPPER_BOUND require an integer. Assert the named seed profile serializes with `calibration_status=provisional_uncalibrated`, 5000/6500/7500 basis points, 80000/120000/160000 cumulative ceilings, 8192 output/tool/checkpoint-recovery reserve tokens, 120 seconds, 8 turns, depth 8, and 3 attempts. `CALIBRATED` requires an external current calibration evidence record bound to the exact profile identity; configuration alone cannot set it.
+Require `0 < checkpoint_at_bps < compact_at_bps < block_at_bps <= 10000`, `0 < checkpoint_ceiling_tokens < compact_ceiling_tokens < block_ceiling_tokens`, a canonical profile-identity digest, positive rendered capacity, rendered `0 <= used_tokens_upper_bound <= capacity`, nonnegative cumulative upper bound, compaction generation, and turn count, registered deterministic producer identity, canonical field order, stable golden bytes, and no unknown fields or floats. The profile identity digest binds provider, exact model/version, route, harness build, system and compaction prompt digests, usage-source identity, tool-schema-set digest, workload class, and transition mechanism without storing secret values. `INCOMPLETE` and `UNAVAILABLE` counters require `used_tokens_upper_bound=None`; COMPLETE and ESTIMATED_UPPER_BOUND require an integer. Assert the named seed profile serializes with `calibration_status=provisional_uncalibrated`, 2500/4000/5000 basis points, 16000/24000/32000 cumulative ceilings, 8192 output/tool/checkpoint-recovery reserve tokens, 120 seconds, 8 turns, depth 8, and 3 attempts. `CALIBRATED` requires an external current calibration evidence record bound to the exact profile identity; configuration alone cannot set it.
+
+Write update-contract tests through public policy APIs and the installed verifier. Generation 2 exact values pass. Missing values, generation rollback, or any built-in threshold above 2500/4000/5000 basis points or 16000/24000/32000 tokens fails. Equal/lower explicit profiles pass without becoming the default. A persisted v1 session produces a required checkpoint/compact-handoff migration decision; a verified v2 session continues. Migration appends a generation/policy binding and never rewrites the prior policy row. Run the same fixtures from an installed wheel so source-only constants cannot satisfy the gate.
 
 ```python
 def test_context_policy_thresholds_are_strictly_ordered() -> None:
@@ -206,7 +216,7 @@ def test_metrics_reject_used_tokens_above_capacity() -> None:
 
 - [ ] **Step 2: Write the complete budget decision table**
 
-Cover rendered boundaries at 49.99%, 50%, 64.99%, 65%, 74.99%, and 75%; cumulative boundaries at 79,999/80,000, 119,999/120,000, and 159,999/160,000 tokens; conflicting ratio/absolute actions where the stronger action wins; reserve-floor breach; turn-count breach; compaction-generation increment; each earlier-boundary signal; exact metric expiry; one second beyond expiry; COMPLETE, ESTIMATED_UPPER_BOUND, INCOMPLETE, and UNAVAILABLE values independently for rendered and cumulative counters; zero/malformed capacity; and producer mismatch. Boundary signals are unique and canonically ordered; phase/tool spikes select at least CHECKPOINT, while high-risk/operator signals select COMPACT_OR_HANDOFF unless a stronger gate applies. `ESTIMATED_UPPER_BOUND` is usable only when its conservative upper bound and deterministic producer are verified. Incomplete, unavailable, expired, or advisory counters emit required UNKNOWN and may not produce CONTINUE under guard.
+Cover rendered boundaries at 24.99%, 25%, 39.99%, 40%, 49.99%, and 50%; cumulative boundaries at 15,999/16,000, 23,999/24,000, and 31,999/32,000 tokens; conflicting ratio/absolute actions where the stronger action wins; reserve-floor breach; turn-count breach; compaction-generation increment; each earlier-boundary signal; exact metric expiry; one second beyond expiry; COMPLETE, ESTIMATED_UPPER_BOUND, INCOMPLETE, and UNAVAILABLE values independently for rendered and cumulative counters; zero/malformed capacity; and producer mismatch. Boundary signals are unique and canonically ordered; phase/tool spikes select at least CHECKPOINT, while high-risk/operator signals select COMPACT_OR_HANDOFF unless a stronger gate applies. `ESTIMATED_UPPER_BOUND` is usable only when its conservative upper bound and deterministic producer are verified. Incomplete, unavailable, expired, or advisory counters emit required UNKNOWN and may not produce CONTINUE under guard.
 
 ```python
 def test_block_boundary_is_inclusive() -> None:
@@ -214,8 +224,8 @@ def test_block_boundary_is_inclusive() -> None:
         provisional_seed_policy(),
         context_metrics(
             rendered_context_capacity_tokens=200_000,
-            rendered_context_used_tokens_upper_bound=149_999,
-            cumulative_session_tokens_upper_bound=160_000,
+            rendered_context_used_tokens_upper_bound=99_999,
+            cumulative_session_tokens_upper_bound=32_000,
         ),
         logical_time(100),
     )
@@ -226,7 +236,7 @@ def test_block_boundary_is_inclusive() -> None:
 - [ ] **Step 3: Run RED**
 
 ```bash
-python -m pytest -q tests/contract/test_context_budget_policy.py tests/contract/test_context_metrics.py tests/contract/test_context_budget_decision.py tests/property/test_context_thresholds.py
+python -m pytest -q tests/contract/test_context_budget_policy.py tests/contract/test_context_metrics.py tests/contract/test_context_budget_decision.py tests/contract/test_context_default_update.py tests/property/test_context_thresholds.py
 ```
 
 Expected: collection fails because context models and evaluator do not exist.
@@ -238,9 +248,10 @@ Compute `rendered_used_bps = rendered_context.used_tokens_upper_bound * 10000 //
 - [ ] **Step 5: Run GREEN and mutation proof**
 
 ```bash
-python -m pytest -q tests/contract/test_context_budget_policy.py tests/contract/test_context_metrics.py tests/contract/test_context_budget_decision.py tests/property/test_context_thresholds.py
-python -m mypy src/agent_continuity/kernel/context.py
-python -m ruff check src/agent_continuity/kernel/context.py tests/contract tests/property
+python -m pytest -q tests/contract/test_context_budget_policy.py tests/contract/test_context_metrics.py tests/contract/test_context_budget_decision.py tests/contract/test_context_default_update.py tests/property/test_context_thresholds.py
+python tools/verify_context_defaults.py
+python -m mypy src/agent_continuity/kernel/context.py src/agent_continuity/kernel/context_defaults.py
+python -m ruff check src/agent_continuity/kernel/context.py src/agent_continuity/kernel/context_defaults.py tests/contract tests/property tools/verify_context_defaults.py
 ```
 
 Expected: all threshold cases pass and planted `>` versus `>=` mutations fail at exact boundaries.
@@ -248,9 +259,10 @@ Expected: all threshold cases pass and planted `>` versus `>=` mutations fail at
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agent_continuity/kernel/context.py src/agent_continuity/kernel/records.py
+git add src/agent_continuity/kernel/context.py src/agent_continuity/kernel/context_defaults.py src/agent_continuity/kernel/records.py
 git add schemas/v1/context-budget-policy.schema.json schemas/v1/context-metrics.schema.json
-git add tests/contract/test_context_budget_policy.py tests/contract/test_context_metrics.py tests/contract/test_context_budget_decision.py tests/property/test_context_thresholds.py
+git add tests/contract/test_context_budget_policy.py tests/contract/test_context_metrics.py tests/contract/test_context_budget_decision.py tests/contract/test_context_default_update.py tests/property/test_context_thresholds.py
+git add tests/golden/context-default-policy-v2.json tools/verify_context_defaults.py
 git commit -m "feat: add deterministic context budget policy"
 ```
 
@@ -999,6 +1011,8 @@ Translation constructs validated immutable models and invokes `ContextContinuity
 
 `tools/verify_release.py` must run every context contract, property, integration, security, crash, replay, schema, mypy, Ruff, target-read-only, installed-wheel, and benchmark test. Add planted omission, authority-broadening, stale-metric, same-fingerprint retry, wrong-actor, wrong-checkpoint, wrong-lineage, unsupported-capability, orphan-scope, and protected-pruning mutants. Require zero survivors.
 
+It must invoke `tools/verify_context_defaults.py` against source and each installed artifact. The release report binds default generation 2 plus exact 2500/4000/5000 basis points and 16000/24000/32000 token ceilings. Missing, raised, source/wheel-divergent, or migration-unverified defaults fail the aggregate update/release gate.
+
 Freeze a public synthetic benchmark with at least 100 seeded material continuity failures and 100 valid controls spanning required-ID omission, contradiction, authority broadening, stale evidence, actor/checkpoint/lineage substitution, below-threshold probe failure, and clean compaction/restart/handoff cases. `tools/benchmark_context_continuity.py` computes `detected_material_failures / seeded_material_failures` and `false_blocks / valid_controls` using integer counts. Pass requires detection >= 90% and false positives <= 5%. Report corpus version, counts, confusion matrix, and SHA-256; explicitly state that passing measures this frozen synthetic corpus only and is not evidence of universal real-world 90% prevention.
 
 - [ ] **Step 6: Run GREEN and full v0.1 regression**
@@ -1008,6 +1022,7 @@ python -m pytest -q
 python -m mypy src/agent_continuity
 python -m ruff check .
 python tools/verify_schemas.py
+python tools/verify_context_defaults.py
 python tools/benchmark_context_continuity.py tests/fixtures/context-continuity-benchmark-v1.jsonl
 python tools/verify_release.py
 ```
@@ -1031,7 +1046,8 @@ git commit -m "feat: expose generic context continuity boundary"
 | Gate | Evidence | Pass condition |
 |---|---|---|
 | Pure-kernel | import isolation and monkeypatch tests | No filesystem, database, clock, subprocess, environment, network, tokenizer, provider, or model access |
-| Budget | threshold decision tables and boundary mutants | Exact 50/65/75% rendered ratios plus 80K/120K/160K cumulative ceilings, strongest-action precedence, reserve, turn, compaction-generation, and freshness behavior pass |
+| Budget | threshold decision tables and boundary mutants | Exact 25/40/50% rendered ratios plus 16K/24K/32K cumulative ceilings, strongest-action precedence, reserve, turn, compaction-generation, and freshness behavior pass |
+| Default update | canonical v2 golden, migration fixtures, source/wheel verifier | Generation 2 exact values survive every update; missing or raised built-in values fail closed; retired v1 sessions checkpoint and hand off before continuation |
 | Calibration truth | policy identity and evidence tests | Seed policy reports PROVISIONAL_UNCALIBRATED; CALIBRATED requires exact current profile-bound behavioral evidence |
 | Drift probe | canonical-ID challenge/response tests | Below-threshold omission, contradiction, substitution, or authority broadening cannot continue |
 | Checkpoint completeness | projection contract tests | Every required protected field resolves to a verified canonical record |

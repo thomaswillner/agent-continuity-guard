@@ -743,6 +743,7 @@ git commit -m "docs: add public governance and CI gates"
 - Create: `tools/build_sbom.py`
 - Create: `tools/verify_decision_coverage.py`
 - Create: `tools/verify_trust_transition.py`
+- Modify: `tools/verify_context_defaults.py`
 - Modify: `tools/verify_release.py`
 - Create: `schemas/v1/private-validation-attestation.schema.json`
 - Create: `schemas/v1/trust-transition-attestation.schema.json`
@@ -806,13 +807,15 @@ Private release mode accepts only canonical `PrivateValidationAttestation/v1` co
 
 `verify_trust_transition.py` requires either a byte-verified previous trusted release cross-check or canonical independent TrustTransitionAttestation/v1. Initial v0.1 has no previous trusted release, so release readiness requires an independent verifier binding exact new TrustRoot and installed-distribution IDs. The current kernel, a promotion decision, corpus-label admission, operator approval, or private-reference attestation cannot self-issue this proof. Candidate mode validates identities/schema and may report `attestation_status=missing` with exit 0; release mode fails closed until pass evidence exists.
 
+`verify_context_defaults.py` loads the canonical v2 golden plus the source or installed distribution and requires default generation 2, 2500/4000/5000 basis points, 16000/24000/32000 token ceilings, and append-only v1-to-v2 migration behavior. Any missing, raised, source/wheel-divergent, or mutable-history result fails. The aggregate release verifier invokes this gate; an update cannot silently restore retired v1 values.
+
 - [ ] **Step 2: Write failing reproducible-build tests**
 
 Require a clean committed source identity and record exact HEAD/tree. Export tracked source twice into different private temporary roots from that identity, set `SOURCE_DATE_EPOCH` to the commit timestamp, build wheel and sdist in separate empty artifact directories with the same sanitized verified build environment, and require byte-identical filenames and SHA-256 digests. Open archives and reject absolute paths, dot-dot, unexpected files, nondeterministic timestamps, missing licence, or missing schemas/package data.
 
 - [ ] **Step 3: Write failing installed-artifact tests**
 
-Configure wheel data so every public schema is listed in wheel RECORD under `share/agent-continuity-guard/schemas/v1`; locate it through `importlib.metadata.Distribution.files`, never a source-relative path. Install each wheel and sdist offline into separate clean virtual environments on every declared Python/platform matrix entry, using only the just-built artifact and a preverified local build-tool wheelhouse for sdist isolation. Run CLI help, init/checkpoint/verify/resume/delegate/accept, JSON evidence, audit anchor, automatic promotion, rollback, schema asset load, and installed distribution rehash. Replay the installed-smoke StateStore audit from genesis through its final release-test head. Prove imports never resolve to source checkout. On Windows, an expected explicit promotion UNKNOWN for an unproved capability is a passing capability-contract result; silent downgrade or false PASS fails.
+Configure wheel data so every public schema is listed in wheel RECORD under `share/agent-continuity-guard/schemas/v1`; locate it through `importlib.metadata.Distribution.files`, never a source-relative path. Install each wheel and sdist offline into separate clean virtual environments on every declared Python/platform matrix entry, using only the just-built artifact and a preverified local build-tool wheelhouse for sdist isolation. Run CLI help, init/checkpoint/verify/resume/delegate/accept, JSON evidence, audit anchor, automatic promotion, rollback, schema asset load, context-default verification/migration, and installed distribution rehash. Replay the installed-smoke StateStore audit from genesis through its final release-test head. Prove imports never resolve to source checkout. On Windows, an expected explicit promotion UNKNOWN for an unproved capability is a passing capability-contract result; silent downgrade or false PASS fails.
 
 - [ ] **Step 4: Implement deterministic SPDX SBOM and artifact manifest**
 
@@ -822,13 +825,14 @@ The tool never uploads, signs with an unavailable key, creates a tag, or publish
 
 - [ ] **Step 5: Enforce coverage and decision proof thresholds**
 
-Run branch coverage and require at least 90 percent overall. `verify_decision_coverage.py` reads explicit tables for canonicalization, verdict, invalidation, lineage, promotion, and audit and requires 100 percent exercised outcomes. Require 100 percent generated-candidate mutant kill, all planted critical mutants killed, positive/negative/mutation proof for every blocking detector, and byte-identical full corpus replay in two clean processes.
+Run branch coverage and require at least 90 percent overall. `verify_decision_coverage.py` reads explicit tables for canonicalization, verdict, invalidation, lineage, promotion, context defaults/migration, and audit and requires 100 percent exercised outcomes. Require 100 percent generated-candidate mutant kill, all planted critical mutants killed, positive/negative/mutation proof for every blocking detector, and byte-identical full corpus replay in two clean processes.
 
 - [ ] **Step 6: Run GREEN**
 
 ```bash
 python -m pytest -q tests/contract/test_tool_outputs.py tests/integration/test_reproducible_build.py tests/integration/test_sdist_wheel_install.py tests/security/test_public_provenance.py tests/security/test_dependency_licences.py
 python tools/verify_schemas.py
+python tools/verify_context_defaults.py
 python tools/verify_provenance.py --mode public
 python tools/verify_decision_coverage.py
 python tools/verify_trust_transition.py --mode candidate
@@ -896,6 +900,7 @@ python -m mypy src/agent_continuity
 python -m ruff check .
 python -m ruff format --check .
 python tools/verify_schemas.py
+python tools/verify_context_defaults.py
 python tools/verify_provenance.py --mode public
 python tools/verify_decision_coverage.py
 python tools/verify_trust_transition.py --mode candidate
@@ -932,6 +937,7 @@ python -m mypy src/agent_continuity
 python -m ruff check .
 python -m ruff format --check .
 python tools/verify_schemas.py
+python tools/verify_context_defaults.py
 python tools/verify_provenance.py --mode public
 python tools/verify_decision_coverage.py
 python tools/verify_trust_transition.py --mode candidate

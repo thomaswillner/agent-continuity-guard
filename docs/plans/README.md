@@ -24,6 +24,8 @@ working, independently testable software. Plans must execute in order.
 
 3. 2026-08-09-02a-context-continuity-boundaries.md
    - Deterministic rendered-ratio and cumulative-token thresholds
+   - Versioned conservative-longrun-v2 defaults: 25/40/50% and 16K/24K/32K
+   - Update/migration gates that fail closed on missing or raised built-in defaults
    - Below-threshold canonical-ID drift probes
    - Protected checkpoint projection and safe retention manifest
    - Compaction, restart, rehydration, and handoff boundaries
