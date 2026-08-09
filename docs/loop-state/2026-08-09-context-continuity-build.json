@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 25,
+  "revision": 26,
   "contract": {
     "revision": 1,
     "goal": {
@@ -83,7 +83,8 @@
       "Task 4 fix round 1 reproduced five RED cases across the four blocker contracts, including both audit time schemas. GREEN passes all five plus 49 focused Task 4/schema tests, 12-schema verification, strict mypy over 19 source files, Ruff, and diff gates. Fix report sha256:abcfc61621a80375584b2d8387a26de425e389dce50508ef0c469cbbdf36d7ec; full maker and independent gates remain pending.",
       "Task 4 fix round 1 re-review passed the prior four repros, 49 focused and 333 full tests, 12 schemas, strict mypy over 19 source files, Ruff, DCO, diff, scoped 27-plugin secrets, isolated imports, packaged schema, and final shared identity gates, but remained FAIL because rewritten event 2 can bind a post-genesis local row while event-1 anchor still matches. Evidence manifest sha256:749ff4e6da3f66e5aebfd44eee0b165ec13b82190aaed5a09266c52ff2ab16cb; persisted review sha256:909ff961194eb7d60a0e8f5e11ea63309e76e378a03c16f1262c9a5e29c490c0. Controller removed the checker-owned read-only temporary root and verified absence.",
       "Task 4 fix round 2 reproduced the anchored post-genesis local-row attack as RED, then GREEN by requiring every nonempty audit local-values list at sequence 1. The residual test and all 50 focused Task 4/schema tests pass with 12 schemas, strict mypy over 19 source files, Ruff, and diff gates. Fix report sha256:94e8afd79c71fed47813fcb9f8bad700ed36923f963db3afc5538c79f3af912e; full and independent gates remain pending.",
-      "Controller reconciliation retained the broader immutable Task 4 review rather than the narrower four-finding stream. Independent round-1 review at sha256:909ff961194eb7d60a0e8f5e11ea63309e76e378a03c16f1262c9a5e29c490c0 found 10 open findings after commit 4246f1e; scoped round-2 review at sha256:4a0c393c88711b6dab92851a319ba7bafbef886fb167a16245595ce7f3965541 closed only post-genesis local-value origin at 7ae7cbd. Findings 1 through 8 and 12 remain open: audit-detail privacy, external state-root confinement, trusted-anchor write admission, frozen schema validation before mutation, reopen rehash, public exports/test boundaries, schema/runtime parity, reorder/link-loss regressions, and default-validator impossible-date rejection."
+      "Controller reconciliation retained the broader immutable Task 4 review rather than the narrower four-finding stream. Independent round-1 review at sha256:909ff961194eb7d60a0e8f5e11ea63309e76e378a03c16f1262c9a5e29c490c0 found 10 open findings after commit 4246f1e; scoped round-2 review at sha256:4a0c393c88711b6dab92851a319ba7bafbef886fb167a16245595ce7f3965541 closed only post-genesis local-value origin at 7ae7cbd. Findings 1 through 8 and 12 remain open: audit-detail privacy, external state-root confinement, trusted-anchor write admission, frozen schema validation before mutation, reopen rehash, public exports/test boundaries, schema/runtime parity, reorder/link-loss regressions, and default-validator impossible-date rejection.",
+      "Task 4 systemic round-3 commit 8bfa1ae passed 100 focused and 375 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable independent review at sha256:52ba9ae8eff87fef80a2f57286ba57018e3ee0be895a04f875b75b12257ca3ea closed six findings but remained FAIL: audit details still persist arbitrary caller text through code/status, target identity drift at the before_commit boundary can occur after a durable commit, and default JSON Schema accepts duplicate head names and over-depth details rejected by runtime. Findings 9 through 11 remain closed."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -100,7 +101,8 @@
       "Added a transaction-bound audit event that binds requested and newly inserted record IDs, approved local digest/kind identities, expected and resulting heads, store identity, sequence, predecessor, subject, logical time, and defensively copied canonical details without sensitive-local bytes.",
       "Hardened Task 4 with genesis-only local-value admission after retry recognition, historical exact-retry lookup bound to still-current result heads, prefix-causal record replay, and an explicit canonical date-time schema checker that does not depend on optional jsonschema extras.",
       "Bound sensitive-local origin into audit replay: final table/reference equality is accepted only when all local identities occur in genesis sequence 1, so an anchored suffix cannot introduce a late local row.",
-      "Reconciled Task 4 controller state to preserve the superset of independently reproduced findings; narrower review evidence cannot erase broader unresolved security gates."
+      "Reconciled Task 4 controller state to preserve the superset of independently reproduced findings; narrower review evidence cannot erase broader unresolved security gates.",
+      "Narrowed Task 4 round-4 scope to three independently reproduced public-boundary defects: closed audit code/status values, pre-commit target identity admission, and default-schema duplicate/depth parity."
     ]
   },
   "gates": [
@@ -157,10 +159,10 @@
   },
   "failure_fingerprint": {
     "gate": "plan1.task4.independent_review",
-    "symptom": "Task 4 public boundaries still permit arbitrary audit narrative, unsafe SQLite paths, writes without trusted-anchor admission, schema drift or pre-validation mutation, tampered reopen, private-only audit APIs/tests, schema/runtime divergence, and untested reorder or link-loss attacks.",
-    "evidence_signature": "sha256:909ff961194eb7d60a0e8f5e11ea63309e76e378a03c16f1262c9a5e29c490c0",
-    "hypothesis": "One systemic public-boundary repair that narrows audit details, binds SQLite to a revalidated ExternalStateRoot and trusted anchor, validates frozen schema before mutation, rehashes on reopen, exposes only public test seams, and aligns schema acceptance with runtime closes findings 1 through 8 and 12 without weakening atomicity or audit identity."
+    "symptom": "Task 4 still accepts arbitrary audit code/status text, can detect target identity drift only after a durable before_commit transaction, and has default-schema duplicate/depth acceptance broader than runtime.",
+    "evidence_signature": "sha256:52ba9ae8eff87fef80a2f57286ba57018e3ee0be895a04f875b75b12257ca3ea",
+    "hypothesis": "Closed enumerated audit code/status values, root/target revalidation immediately before COMMIT with rollback on drift, and schema shapes that make duplicate and depth constraints default-validator enforceable close the three residuals without weakening Task 4 semantics."
   },
-  "next_action": "Run Task 4 systemic public-boundary fix round 3 for findings 1 through 8 and 12, then require complete immutable independent PASS before Task 5.",
+  "next_action": "Run escalated Task 4 fix round 4 for residual findings 1, 2, and 7, then obtain scoped immutable independent review before Task 5.",
   "verdict": "IN_PROGRESS"
 }
