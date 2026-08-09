@@ -577,7 +577,7 @@ class HeadUpdate:
 
 @dataclass(frozen=True, slots=True)
 class MultiHeadCommitReceipt:
-    heads: Mapping[str, HeadState]
+    heads: tuple[tuple[str, HeadState], ...]
     inserted_record_ids: tuple[RecordId, ...]
 
 
@@ -634,7 +634,7 @@ class StateStore(Protocol):
 
 - [ ] **Step 1: Write failing atomicity and tamper tests**
 
-Prove genesis commit with caller-approved sensitive-local rows, atomic two-head commit, duplicate head-name rejection, reopen rehash, idempotent same bytes, same ID/different bytes integrity error, stale CAS on any expected head, immutable UPDATE/DELETE triggers, injected failure at each transaction stage, audit mutation detection, anchor match, and anchored truncation detection. Audit bytes bind only local-value digest/kind, never value bytes.
+Prove genesis commit with caller-approved sensitive-local rows, the same approved bytes stored independently under both allowed goal and criterion kinds, atomic two-head commit, immutable ordered receipt heads, duplicate head-name rejection, reopen rehash, idempotent same bytes, same ID/different bytes integrity error, stale CAS on any expected head, missing new-head record rejection, immutable UPDATE/DELETE triggers, injected failure at each transaction stage, after-commit reconciliation, audit mutation detection, anchor match, and anchored truncation detection. Audit bytes bind only local-value digest/kind, never value bytes. Mutating a caller-owned nested `AuditEventDraft.details` object after construction must not change committed canonical bytes.
 
 - [ ] **Step 2: Run RED**
 
@@ -660,23 +660,27 @@ CREATE TABLE records (
 ) STRICT;
 
 CREATE TABLE sensitive_local_values (
-    digest TEXT PRIMARY KEY,
+    digest TEXT NOT NULL,
     kind TEXT NOT NULL,
-    value BLOB NOT NULL
+    value BLOB NOT NULL,
+    PRIMARY KEY (digest, kind)
 ) STRICT;
 
 CREATE TABLE audit_events (
     sequence INTEGER PRIMARY KEY,
     event_id TEXT UNIQUE NOT NULL,
     previous_event_id TEXT,
-    canonical_bytes BLOB NOT NULL
+    canonical_bytes BLOB NOT NULL,
+    FOREIGN KEY (previous_event_id) REFERENCES audit_events(event_id)
 ) STRICT;
 
 CREATE TABLE heads (
     name TEXT PRIMARY KEY,
     record_id TEXT NOT NULL,
     audit_event_id TEXT NOT NULL,
-    audit_sequence INTEGER NOT NULL
+    audit_sequence INTEGER NOT NULL,
+    FOREIGN KEY (record_id) REFERENCES records(record_id),
+    FOREIGN KEY (audit_event_id) REFERENCES audit_events(event_id)
 ) STRICT;
 ```
 
@@ -684,7 +688,7 @@ Add BEFORE UPDATE/DELETE triggers for records, sensitive_local_values, and audit
 
 - [ ] **Step 4: Implement CAS transaction and fault labels**
 
-Use `BEGIN IMMEDIATE`. `commit_many` validates unique ordered head names, compares every expected head before any update, inserts approved sensitive-local rows plus records/event, and changes every projection atomically. It verifies each local digest against exact bytes and rejects unapproved/unknown kinds. `commit` is a one-head wrapper. Invoke optional fault injector at `after_records`, `after_audit`, `after_head`, `before_commit`, and `after_commit`. Reopen and verify inserted bytes plus every resulting head and audit head.
+Use `BEGIN IMMEDIATE`. `commit_many` validates unique ordered head names, compares every expected head before any update, requires every new head record to exist in the same transaction or current store, inserts approved sensitive-local rows plus records/event, and changes every projection atomically. It verifies each local digest against exact bytes and rejects unapproved/unknown kinds. Frozen models defensively snapshot nested canonical data and receipts expose ordered immutable tuples, never caller-owned mappings. `commit` is a one-head wrapper. Invoke optional fault injector at `after_records`, `after_audit`, `after_head`, `before_commit`, and `after_commit`. An `after_commit` exception is reconciled by reopening and verifying the exact intended committed state; retry remains idempotent and never reports a second logical event. Reopen and verify inserted bytes plus every resulting head and audit head.
 
 - [ ] **Step 5: Implement full audit and AuditAnchor/v1**
 

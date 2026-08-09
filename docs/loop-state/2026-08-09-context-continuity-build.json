@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 6,
+  "revision": 7,
   "contract": {
     "revision": 1,
     "goal": {
@@ -46,7 +46,7 @@
       "rag-primary-source-research"
     ],
     "wrappers": [
-      "runtime-enforcement-contract",
+      "persisted-contract-and-manual-admission",
       "independent-code-review"
     ]
   },
@@ -62,13 +62,16 @@
       "Hermes official documentation and live sanitized configuration prove its built-in background self-improvement loop is active; ACG remains a separate continuity boundary and does not install a duplicate Hermes learner.",
       "Primary-source report covers 27 current sources and labels all 50/65/75 percent ratios and 80K/120K/160K ceilings PROVISIONAL_UNCALIBRATED; no universal onset token count or universal 90 percent prevention claim is supported.",
       "Plan 1 Tasks 1 through 3 are implemented in commits b9da47d, 6fb64a3, and 0996f2c. Task 1 review passed; Task 2 and Task 3 remain behind independent review and remediation gates.",
-      "Task 2 independent review failed with five high, three medium, and one low finding. Fix round 1 is bounded to strict runtime records, path semantics, deterministic ordering, deep immutability, and canonical verifier errors."
+      "Task 2 independent review failed with five high, three medium, and one low finding. Fix round 1 is bounded to strict runtime records, path semantics, deterministic ordering, deep immutability, and canonical verifier errors.",
+      "Task 2 fix round 1 is implemented at 1373ad6 with maker-reported focused and full GREEN evidence; independent re-review remains pending, so the task is not accepted.",
+      "Mechanical runtime enforcement is not active for repository construction: current execution uses this persisted contract, explicit ownership, immutable commit ranges, and manual admission until typed state, policy, writeback, and budget controls are behaviorally available."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
       "Added provisional 80K/120K/160K cumulative ceilings alongside 50/65/75 percent rendered-context ratios, with earliest strongest action winning.",
       "Added deterministic below-threshold canonical-ID probes, verified meta-handoff lineage, adapter capability qualification, and a frozen synthetic continuity benchmark contract.",
-      "Bound calibration identity to provider/model/route/harness/prompts/usage/tool-schema/workload/transition and added earlier phase, risk, operator, and tool-output boundary signals."
+      "Bound calibration identity to provider/model/route/harness/prompts/usage/tool-schema/workload/transition and added earlier phase, risk, operator, and tool-output boundary signals.",
+      "Corrected the Task 4 contract to require immutable receipt heads, composite sensitive-local identity by digest and kind, projection foreign keys, exact new-head record existence, defensive nested snapshots, and deterministic after-commit reconciliation."
     ]
   },
   "gates": [
