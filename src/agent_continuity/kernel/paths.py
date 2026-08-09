@@ -209,10 +209,10 @@ class PathScopeV1:
             raise CanonicalJSONError("only a TREE scope may denote target root")
 
     def contains(self, candidate: PathIdentityV1) -> bool:
-        if self.path is None:
-            return True
         if type(candidate) is not PathIdentityV1:
             return False
+        if self.path is None:
+            return True
         if self.path.encoding != candidate.encoding:
             return False
         scope_case_key = self.path.case_key_bytes()

@@ -150,6 +150,12 @@ def test_path_scope_rejects_non_identity_runtime_path() -> None:
         PathScopeV1(path=object(), kind=PathScopeKind.TREE)  # type: ignore[arg-type]
 
 
+def test_target_root_scope_rejects_non_identity_candidate() -> None:
+    root = PathScopeV1(path=None, kind=PathScopeKind.TREE)
+
+    assert root.contains(object()) is False  # type: ignore[arg-type]
+
+
 def test_external_path_scope_kind_parser_is_explicit_and_strict() -> None:
     parser = getattr(paths_module, "parse_path_scope_kind", None)
     assert callable(parser)
