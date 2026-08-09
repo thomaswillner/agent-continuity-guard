@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 3,
+  "revision": 4,
   "contract": {
     "revision": 1,
     "goal": {
@@ -60,7 +60,8 @@
       "Deterministic loop router selected current-fact RAG as the primary phase, TDD as follow-up, and multi-agent plus maker-checker wrappers with no contract gaps.",
       "Context plan now distinguishes rendered context, cumulative session usage, compaction generation, and turns since verified checkpoint.",
       "Hermes official documentation and live sanitized configuration prove its built-in background self-improvement loop is active; ACG remains a separate continuity boundary and does not install a duplicate Hermes learner.",
-      "Primary-source report covers 27 current sources and labels all 50/65/75 percent ratios and 80K/120K/160K ceilings PROVISIONAL_UNCALIBRATED; no universal onset token count or universal 90 percent prevention claim is supported."
+      "Primary-source report covers 27 current sources and labels all 50/65/75 percent ratios and 80K/120K/160K ceilings PROVISIONAL_UNCALIBRATED; no universal onset token count or universal 90 percent prevention claim is supported.",
+      "Plan 1 Tasks 1 through 3 are implemented in commits b9da47d, 6fb64a3, and 0996f2c. Task 1 review passed; Task 2 and Task 3 remain behind independent review and remediation gates."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -117,10 +118,10 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 0
+      "implementation_plan_tasks": 3
     }
   },
   "failure_fingerprint": null,
-  "next_action": "Complete independent review and dependency-ordered Plan 1 TDD, then commit the reconciled research, context plan, roadmap, and loop state without mixing implementation ownership.",
+  "next_action": "Close Task 2 and Task 3 independent review findings with RED/GREEN fix commits before starting Plan 1 Task 4.",
   "verdict": "IN_PROGRESS"
 }
