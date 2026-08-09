@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 18,
+  "revision": 19,
   "contract": {
     "revision": 1,
     "goal": {
@@ -76,7 +76,8 @@
       "Task 3 residual fix commit 758a31b passed public RED-to-GREEN, 77 adversarial, 117 focused, 201 full, nine-schema, strict mypy, Ruff, DCO, diff, secret, export, exact-path, and clean-worktree gates. Independent re-review still returned FAIL at evidence sha256:2e9499f36eb4f3b20347942cf1eca6cb7b3ee550803b6b4ab838cb40eeb18a08 because extra/interior NUL records could return false clean, a lone-surrogate target leaked UnicodeEncodeError, remote whitespace and fetch/push role identity were incomplete, symbolic-ref path components exceeded the traversal budget, and twelve integration tests still called private production members.",
       "The isolated residual-check fingerprint exhausted both permitted attempts. The next attempt is admitted only under a new systemic boundary-validator fingerprint: centralized canonical frame, caller-path, symbolic-ref, and role-bound remote validators plus an automated public-test architecture gate and exhaustive grammar matrices.",
       "Task 3 systemic boundary-validator commit 626e268 passed 215 focused and 299 full tests, nine-schema verification, strict mypy over 15 source files, Ruff, diff, DCO, scoped secret, and isolated-archive gates. Independent review reproduced no additional behavior defect but remained FAIL because the architecture gate omitted tests/contract/test_plan1_schemas.py, where three private seams bypassed the enumerated public-test boundary. Review evidence sha256:9a56b03e88a5ba57dcf348790fd4cde995fc22187b78799f85d9060aef226aae.",
-      "Task 3 architecture-inventory repair produced the expected RED with exactly three omitted private-boundary violations, then GREEN with 17 contract tests and 299 full tests. Nine-schema verification, strict mypy over 15 source files, Ruff, diff, and scoped secret gates pass; immutable independent re-review remains pending."
+      "Task 3 architecture-inventory repair produced the expected RED with exactly three omitted private-boundary violations, then GREEN with 17 contract tests and 299 full tests. Nine-schema verification, strict mypy over 15 source files, Ruff, diff, and scoped secret gates pass; immutable independent re-review remains pending.",
+      "Task 3 immutable architecture-repair re-review passed with zero violations across the complete four-file test inventory, reconstructed base RED of exactly three, 17 contract tests, 230 focused tests, 299 full tests, nine schemas, strict mypy over 15 source files, Ruff, DCO, diff, scoped secret, and isolated-import gates. Canonical checker evidence manifest sha256:deb37dd4243de073d446f17a09ca704002a978d5b18658dfb673dddb8c65317b; persisted report sha256:fb3c759e0265fe113273c6097c0dff4552a2ecc1bfb5293f7a7c5dc4b27f3ed5."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -88,7 +89,8 @@
       "Replaced retired 50/65/75 percent and 80K/120K/160K seed defaults with generation-2 25/40/50 percent and 16K/24K/32K. Added source, installed-artifact, migration, CI, and release anti-regression gates so updates fail closed on a missing or silently raised built-in default while preserving append-only historical policy records.",
       "Rerouted Task 3 from isolated boundary checks to centralized validators: canonical NUL framing, pre-OS caller-path validation, strict ref grammar with byte/component/chain budgets, remote name-role-value identity, shared metadata enumeration, exhaustive public-interface matrices, and an AST gate that forbids integration/security tests from touching private production members.",
       "Reclassified the remaining Task 3 failure as one architecture-inventory cluster: the public-boundary AST gate must cover Task 3 contract, integration, and security tests and reject every private production seam exposed by that complete inventory.",
-      "Expanded the Task 3 architecture inventory to its own gate plus the Plan 1 schema contract, integration, and security tests; migrated capture imports to the public package and renamed the schema verifier golden factory to the public schema_goldens seam."
+      "Expanded the Task 3 architecture inventory to its own gate plus the Plan 1 schema contract, integration, and security tests; migrated capture imports to the public package and renamed the schema verifier golden factory to the public schema_goldens seam.",
+      "Closed Plan 1 Task 3 only after immutable independent review reproduced RED, GREEN, complete test inventory, source boundary, and secret-safe artifact evidence."
     ]
   },
   "gates": [
@@ -139,16 +141,16 @@
       "implementation_plan_tasks": 38
     },
     "used": {
-      "retries_per_failure_fingerprint": 1,
+      "retries_per_failure_fingerprint": 0,
       "implementation_plan_tasks": 3
     }
   },
   "failure_fingerprint": {
-    "gate": "plan1.task3.independent_review",
-    "symptom": "The Task 3 public-boundary architecture gate omits a Task 3 contract test that imports a private capture module and reaches two private schema-verifier seams, so its clean result does not cover the complete Task 3 test surface.",
-    "evidence_signature": "sha256:9a56b03e88a5ba57dcf348790fd4cde995fc22187b78799f85d9060aef226aae",
-    "hypothesis": "Adding every Task 3 contract, integration, and security test to the AST inventory and migrating all newly exposed accesses to public APIs closes the architecture bypass without changing proven capture behavior."
+    "gate": "",
+    "symptom": "",
+    "evidence_signature": "",
+    "hypothesis": ""
   },
-  "next_action": "Commit the bounded Task 3 architecture-inventory repair and obtain immutable independent re-review before starting Plan 1 Task 4.",
+  "next_action": "Begin Plan 1 Task 4 RED tests for atomic SQLite StateStore and audit anchors.",
   "verdict": "IN_PROGRESS"
 }
