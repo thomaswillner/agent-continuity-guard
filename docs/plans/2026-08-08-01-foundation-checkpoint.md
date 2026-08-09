@@ -680,7 +680,7 @@ CREATE TABLE heads (
 ) STRICT;
 ```
 
-Add BEFORE UPDATE/DELETE triggers for records, sensitive_local_values, and audit_events. `sensitive_local_values` is reserved for the explicit caller-approved interface added in Plan 4; Plan 1 never writes it. Configure `journal_mode=DELETE`, `synchronous=FULL`, `foreign_keys=ON`. Unsupported schema version is integrity exit 3; migrations are deferred.
+Add BEFORE UPDATE/DELETE triggers for records, sensitive_local_values, and audit_events. Plan 1 may persist only explicitly supplied goal and acceptance-criteria text as `SensitiveLocalValueDraft` rows during genesis; raw prompts, transcripts, source excerpts, and secrets remain forbidden. Configure `journal_mode=DELETE`, `synchronous=FULL`, `foreign_keys=ON`. Unsupported schema version is integrity exit 3; migrations are deferred.
 
 - [ ] **Step 4: Implement CAS transaction and fault labels**
 
