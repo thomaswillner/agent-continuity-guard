@@ -1,0 +1,126 @@
+{
+  "schema_version": "acg_build_loop_state_v1",
+  "revision": 3,
+  "contract": {
+    "revision": 1,
+    "goal": {
+      "outcome": "Deliver a public-safe model-neutral continuity guard that detects context pressure or drift, prepares an atomic handoff, verifies destination rehydration, and preserves meta-handoff lineage.",
+      "success_measure": "Approved plans implemented; full tests, typing, lint, schemas, package build, security checks, and frozen continuity benchmark pass; benchmark detects at least 90 percent of seeded material continuity failures with at most 5 percent false positives; GitHub publication occurs only after release gates pass."
+    },
+    "invariants": [
+      "Do not claim universal 90 percent protection without a defined benchmark and current evidence.",
+      "Do not copy proprietary SPX source, prose, fixtures, paths, names, hashes, or datasets.",
+      "Preserve pre-existing dirty work and unrelated user changes.",
+      "Keep guarded targets read-only and store ACG state externally.",
+      "Treat model summaries, transcripts, prompts, and acknowledgements as untrusted data.",
+      "Do not install hooks, daemons, schedulers, or vendor-specific runtime adapters in v0.1.",
+      "Do not publish remotely until hardening and release gates pass.",
+      "Do not expose credentials, secret values, private transcripts, or hidden reasoning."
+    ],
+    "authority": {
+      "allowed": [
+        "Research current primary sources.",
+        "Edit, test, build, and commit files only inside this repository.",
+        "Create and push a new GitHub repository after all publication gates pass."
+      ],
+      "approvals_required": [
+        "Install or activate ACG in any production agent runtime.",
+        "Create hooks, LaunchAgents, cron jobs, daemons, or automatic session-control integrations.",
+        "Broaden authority beyond continuity observation and handoff enforcement."
+      ]
+    }
+  },
+  "owner": {
+    "controller": "codex-root",
+    "maker": "codex-root-and-plan-workers",
+    "checker": "deterministic-gates-plus-independent-code-review"
+  },
+  "topology": {
+    "loop_id": "acg-context-continuity-build",
+    "parent_id": null,
+    "depth": 0,
+    "max_depth": 2,
+    "execution": "dependency-ordered",
+    "primary_loop": "tdd",
+    "prerequisites": [
+      "rag-primary-source-research"
+    ],
+    "wrappers": [
+      "runtime-enforcement-contract",
+      "independent-code-review"
+    ]
+  },
+  "evidence": {
+    "baseline": [
+      "Git main at de7a9b8 with approved v0.1 design and implementation plans.",
+      "Pre-existing uncommitted context-continuity plan and plan-index update preserved.",
+      "No Python package, tests, GitHub remote, hook, daemon, or provider adapter exists."
+    ],
+    "current": [
+      "Deterministic loop router selected current-fact RAG as the primary phase, TDD as follow-up, and multi-agent plus maker-checker wrappers with no contract gaps.",
+      "Context plan now distinguishes rendered context, cumulative session usage, compaction generation, and turns since verified checkpoint.",
+      "Hermes official documentation and live sanitized configuration prove its built-in background self-improvement loop is active; ACG remains a separate continuity boundary and does not install a duplicate Hermes learner.",
+      "Primary-source report covers 27 current sources and labels all 50/65/75 percent ratios and 80K/120K/160K ceilings PROVISIONAL_UNCALIBRATED; no universal onset token count or universal 90 percent prevention claim is supported."
+    ],
+    "delta": [
+      "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
+      "Added provisional 80K/120K/160K cumulative ceilings alongside 50/65/75 percent rendered-context ratios, with earliest strongest action winning.",
+      "Added deterministic below-threshold canonical-ID probes, verified meta-handoff lineage, adapter capability qualification, and a frozen synthetic continuity benchmark contract."
+    ]
+  },
+  "gates": [
+    {
+      "name": "research",
+      "criterion": "Current primary-source report separates evidence, inference, and unknowns and rejects unsupported universal claims.",
+      "status": "passed",
+      "evidence": [
+        "docs/research/2026-08-09-context-rot-and-handoff-evidence.md",
+        "Strict citation ledger passed; all 27 cited URLs returned HTTP 200 on 2026-08-09."
+      ]
+    },
+    {
+      "name": "implementation",
+      "criterion": "Dependency-ordered plans and context-continuity extension are implemented through public seams.",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "name": "continuity_benchmark",
+      "criterion": "Frozen labeled corpus detection rate is at least 90 percent and false-positive rate is at most 5 percent; synthetic scope is disclosed.",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "name": "quality",
+      "criterion": "Full pytest, mypy, Ruff, schema, build, installed-wheel, mutation, security, and target-read-only gates pass.",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "name": "review",
+      "criterion": "Independent standards and specification reviews report no unresolved blocking findings.",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "name": "publication",
+      "criterion": "GitHub repository exists, pushed commit matches validated local HEAD, default branch is protected by project policy, and public files contain no private residue.",
+      "status": "pending",
+      "evidence": []
+    }
+  ],
+  "budget": {
+    "limits": {
+      "retries_per_failure_fingerprint": 2,
+      "rehydration_attempts_per_transition": 3,
+      "implementation_plan_tasks": 38
+    },
+    "used": {
+      "retries_per_failure_fingerprint": 0,
+      "implementation_plan_tasks": 0
+    }
+  },
+  "failure_fingerprint": null,
+  "next_action": "Complete independent review and dependency-ordered Plan 1 TDD, then commit the reconciled research, context plan, roadmap, and loop state without mixing implementation ownership.",
+  "verdict": "IN_PROGRESS"
+}
