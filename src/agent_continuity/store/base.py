@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 from agent_continuity.kernel.audit import AuditAnchorV1, AuditVerification
@@ -166,34 +166,50 @@ class AuditHeadState:
             raise StoreValidationError("audit head sequence must be a positive integer")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class AuditEventDraft:
     kind: str
     subject_id: RecordId
     logical_time: LogicalTime
-    details: JsonObject
+    _details_bytes: bytes = field(repr=False)
 
-    def __post_init__(self) -> None:
+    def __init__(
+        self,
+        kind: str,
+        subject_id: RecordId,
+        logical_time: LogicalTime,
+        details: JsonObject,
+    ) -> None:
         try:
-            require_public_component(self.kind, field="audit event kind")
+            require_public_component(kind, field="audit event kind")
         except ValueError as error:
             raise StoreValidationError("audit event kind is invalid") from error
-        require_record_id(self.subject_id, field="audit subject ID")
-        if type(self.logical_time) is not str:
+        require_record_id(subject_id, field="audit subject ID")
+        if type(logical_time) is not str:
             raise StoreValidationError("audit logical time must be canonical text")
         try:
-            validate_logical_time(self.logical_time)
+            validate_logical_time(logical_time)
         except ValueError as error:
             raise StoreValidationError("audit logical time is invalid") from error
-        if type(self.details) is not dict:
+        if type(details) is not dict:
             raise StoreValidationError("audit details must be an exact JSON object")
         try:
-            snapshot = canonical_loads(canonical_bytes(self.details))
+            snapshot = canonical_loads(canonical_bytes(details))
         except ValueError as error:
             raise StoreValidationError(
                 "audit details are not canonical JSON"
             ) from error
-        object.__setattr__(self, "details", _normalize_audit_details(snapshot))
+        normalized = _normalize_audit_details(snapshot)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "subject_id", subject_id)
+        object.__setattr__(self, "logical_time", logical_time)
+        object.__setattr__(self, "_details_bytes", canonical_bytes(normalized))
+
+    @property
+    def details(self) -> JsonObject:
+        """Return a fresh copy of immutable canonical audit details."""
+
+        return canonical_loads(self._details_bytes)
 
 
 @dataclass(frozen=True, slots=True)

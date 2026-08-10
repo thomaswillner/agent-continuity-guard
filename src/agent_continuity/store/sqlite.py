@@ -236,6 +236,72 @@ def _head_updates_payload(updates: tuple[HeadUpdate, ...]) -> JsonObject:
     return {update.name: _head_update_payload(update) for update in updates}
 
 
+def _stored_head_update_entries(
+    value: object,
+) -> tuple[tuple[str, JsonValue, JsonValue], ...]:
+    entries: list[tuple[str, JsonValue, JsonValue]] = []
+    if type(value) is dict:
+        if not value:
+            raise StoreIntegrityError("audit head updates are invalid")
+        updates = cast(dict[str, object], value)
+        for name in sorted(updates):
+            item = updates[name]
+            if type(item) is not dict or set(item) != {
+                "expected",
+                "new_record_id",
+            }:
+                raise StoreIntegrityError("audit head update is invalid")
+            require_head_name(name)
+            item_object = cast(dict[str, object], item)
+            entries.append(
+                (
+                    name,
+                    cast(JsonValue, item_object["expected"]),
+                    cast(JsonValue, item_object["new_record_id"]),
+                )
+            )
+        return tuple(entries)
+    if type(value) is not list or not value:
+        raise StoreIntegrityError("audit head updates are invalid")
+    for item in value:
+        if type(item) is not dict or set(item) != {
+            "expected",
+            "name",
+            "new_record_id",
+        }:
+            raise StoreIntegrityError("audit head update is invalid")
+        item_object = cast(dict[str, object], item)
+        name = cast(str, item_object["name"])
+        require_head_name(name)
+        entries.append(
+            (
+                name,
+                cast(JsonValue, item_object["expected"]),
+                cast(JsonValue, item_object["new_record_id"]),
+            )
+        )
+    names = [name for name, _expected, _new_record_id in entries]
+    if names != sorted(names) or len(names) != len(set(names)):
+        raise StoreIntegrityError("audit head updates are not ordered")
+    return tuple(entries)
+
+
+def _verified_audit_event_payload(
+    raw_bytes: bytes,
+    event_id_value: RecordId,
+) -> JsonObject:
+    try:
+        require_digest(event_id_value)
+        payload = canonical_loads(raw_bytes)
+    except ValueError as error:
+        raise StoreIntegrityError("audit event bytes are invalid") from error
+    if set(payload) != _AUDIT_EVENT_KEYS:
+        raise StoreIntegrityError("audit event fields are invalid")
+    if record_id("AuditEvent/v1", "v1", payload) != event_id_value:
+        raise StoreIntegrityError("audit event ID is invalid")
+    return payload
+
+
 def _local_value_payload(value: SensitiveLocalValueDraft) -> JsonObject:
     return {"digest": value.digest, "kind": value.kind}
 
@@ -724,7 +790,14 @@ class SQLiteStateStore:
 
     @staticmethod
     def _event_signature(payload: JsonObject) -> JsonObject:
-        return {key: payload[key] for key in _TRANSACTION_KEYS}
+        signature = {key: payload[key] for key in _TRANSACTION_KEYS}
+        signature["head_updates"] = {
+            name: {"expected": expected, "new_record_id": new_record_id}
+            for name, expected, new_record_id in _stored_head_update_entries(
+                payload["head_updates"]
+            )
+        }
+        return signature
 
     def _existing_retry_receipt(
         self,
@@ -741,7 +814,9 @@ class SQLiteStateStore:
             try:
                 sequence = cast(int, row[0])
                 event_id_value = RecordId(cast(str, row[1]))
-                payload = canonical_loads(bytes(row[2]))
+                payload = _verified_audit_event_payload(
+                    bytes(row[2]), event_id_value
+                )
                 if self._event_signature(payload) != signature:
                     continue
                 inserted_raw = payload["inserted_record_ids"]
@@ -1109,11 +1184,9 @@ class SQLiteStateStore:
                 )
                 if previous_value != previous_event_id:
                     raise StoreIntegrityError("audit linkage is invalid")
-                payload = canonical_loads(bytes(raw_bytes))
-                if set(payload) != _AUDIT_EVENT_KEYS:
-                    raise StoreIntegrityError("audit event fields are invalid")
-                if record_id("AuditEvent/v1", "v1", payload) != event_id_value:
-                    raise StoreIntegrityError("audit event ID is invalid")
+                payload = _verified_audit_event_payload(
+                    bytes(raw_bytes), event_id_value
+                )
                 if (
                     payload["sequence"] != sequence
                     or payload["previous_event_id"] != previous_value
@@ -1173,23 +1246,13 @@ class SQLiteStateStore:
                         "sensitive-local values originate only at genesis"
                     )
                 referenced_locals.update(local_identities)
-                updates = payload["head_updates"]
-                if type(updates) is not dict or not updates:
-                    raise StoreIntegrityError("audit head updates are invalid")
-                update_names: list[str] = []
-                for name in sorted(updates):
-                    item = updates[name]
-                    if type(item) is not dict or set(item) != {
-                        "expected",
-                        "new_record_id",
-                    }:
-                        raise StoreIntegrityError("audit head update is invalid")
-                    item_object = cast(dict[str, object], item)
-                    require_head_name(name)
-                    expected = _head_from_payload(item_object["expected"])
+                for name, expected_payload, new_record_payload in (
+                    _stored_head_update_entries(payload["head_updates"])
+                ):
+                    expected = _head_from_payload(expected_payload)
                     if replayed_heads.get(name) != expected:
                         raise StoreIntegrityError("audit head CAS history is invalid")
-                    new_record_id = RecordId(cast(str, item_object["new_record_id"]))
+                    new_record_id = RecordId(cast(str, new_record_payload))
                     require_record_id(new_record_id, field="audit new record ID")
                     if new_record_id not in event_available_records:
                         raise StoreIntegrityError(
@@ -1198,9 +1261,6 @@ class SQLiteStateStore:
                     replayed_heads[name] = HeadState(
                         new_record_id, event_id_value, sequence
                     )
-                    update_names.append(name)
-                if update_names != sorted(set(update_names)) or not update_names:
-                    raise StoreIntegrityError("audit head updates are not ordered")
                 previous_event_id = event_id_value
                 audit_head = AuditHeadState(event_id_value, sequence)
             actual_heads = {

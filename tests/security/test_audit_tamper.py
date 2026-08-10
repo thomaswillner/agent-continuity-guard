@@ -20,10 +20,16 @@ from agent_continuity.kernel.records import make_record
 from agent_continuity.store import (
     AuditAnchorV1,
     AuditEventDraft,
+    HeadUpdate,
     SQLiteStateStore,
     StoreIntegrityError,
 )
-from tests.helpers.state_store import open_test_store
+from tests.helpers.state_store import (
+    LEGACY_ARRAY_EVENT_ID,
+    legacy_array_event_payload,
+    open_test_store,
+    write_legacy_array_store,
+)
 
 LOGICAL_TIME = validate_logical_time("2026-08-09T12:00:00Z")
 
@@ -109,6 +115,212 @@ def test_full_audit_and_matching_external_anchor_pass(tmp_path: Path) -> None:
     assert verification.valid is True
     assert verification.supplied_anchor_matched is True
     assert verification.audit_head_id == anchor.audit_head_id
+
+
+def test_frozen_v1_legacy_array_store_reopens_without_rewrite(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-array.sqlite3"
+    fixture = write_legacy_array_store(path)
+    anchor = AuditAnchorV1(
+        store_id="store-test",
+        audit_sequence=1,
+        audit_head_id=fixture.event_id,
+        created_at=validate_logical_time("2026-08-09T12:01:00Z"),
+        label="legacy-safe",
+    )
+    before_bytes = path.read_bytes()
+    before_metadata = path.stat()
+
+    with _store(path, trusted_anchor=anchor) as store:
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_event_id == fixture.event_id  # type: ignore[union-attr]
+        assert tuple(
+            (name, store.read_head(name)) for name, _head in fixture.heads
+        ) == fixture.heads
+        assert tuple(store.load_record(item.record_id) for item in fixture.records) == (
+            fixture.records
+        )
+        verification = store.verify_audit(anchor)
+        assert verification.valid is True
+        assert verification.supplied_anchor_matched is True
+
+    after_metadata = path.stat()
+    assert path.read_bytes() == before_bytes
+    assert after_metadata.st_ino == before_metadata.st_ino
+    assert after_metadata.st_mtime_ns == before_metadata.st_mtime_ns
+    assert all(
+        not path.with_name(path.name + suffix).exists()
+        for suffix in ("-journal", "-shm", "-wal")
+    )
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            "SELECT event_id, canonical_bytes FROM audit_events WHERE sequence = 1"
+        ).fetchone()
+    assert row == (LEGACY_ARRAY_EVENT_ID, fixture.event_bytes)
+
+
+def test_new_write_after_legacy_array_reopen_remains_object_form(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-then-current.sqlite3"
+    fixture = write_legacy_array_store(path)
+    legacy_heads = dict(fixture.heads)
+    anchor = AuditAnchorV1(
+        store_id="store-test",
+        audit_sequence=1,
+        audit_head_id=fixture.event_id,
+        created_at=validate_logical_time("2026-08-09T12:01:00Z"),
+        label="legacy-safe",
+    )
+    current = _record("current-after-legacy")
+
+    with _store(path, trusted_anchor=anchor) as store:
+        receipt = store.commit(
+            records=(current,),
+            event=_event(current),
+            head_name="head:a",
+            expected_head=legacy_heads["head:a"],
+            new_head_id=current.record_id,
+        )
+        assert receipt.head.audit_sequence == 2
+        verification = store.verify_audit(anchor)
+        assert verification.valid is True
+        assert verification.supplied_anchor_matched is True
+
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT event_id, canonical_bytes FROM audit_events ORDER BY sequence"
+        ).fetchall()
+    assert len(rows) == 2
+    assert rows[0] == (fixture.event_id, fixture.event_bytes)
+    first_payload = canonical_loads(bytes(rows[0][1]))
+    second_payload = canonical_loads(bytes(rows[1][1]))
+    assert isinstance(first_payload["head_updates"], list)
+    assert isinstance(second_payload["head_updates"], dict)
+    assert second_payload["previous_event_id"] == fixture.event_id
+
+
+def test_exact_retry_of_legacy_array_event_returns_original_receipt(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-exact-retry.sqlite3"
+    fixture = write_legacy_array_store(path)
+    second, first = fixture.records
+    event = AuditEventDraft(
+        kind="checkpoint",
+        subject_id=first.record_id,
+        logical_time=validate_logical_time("2026-08-09T12:00:00Z"),
+        details={
+            "flag": True,
+            "items": [{"record_id": second.record_id}],
+        },
+    )
+    before_bytes = path.read_bytes()
+
+    with _store(path) as store:
+        receipt = store.commit_many(
+            records=(second, first),
+            event=event,
+            head_updates=(
+                HeadUpdate("head:a", None, first.record_id),
+                HeadUpdate("head:b", None, second.record_id),
+            ),
+        )
+        assert receipt.heads == fixture.heads
+        assert receipt.inserted_record_ids == tuple(
+            item.record_id for item in fixture.records
+        )
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_sequence == 1  # type: ignore[union-attr]
+        assert store.verify_audit().valid is True
+
+    assert path.read_bytes() == before_bytes
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "duplicate",
+        "unsorted",
+        "malformed",
+        "free-text-code",
+        "free-text-status",
+        "bad-link",
+        "bad-cas",
+        "bad-prefix",
+    ],
+)
+def test_legacy_array_replay_rejects_unsafe_history_without_rewrite(
+    tmp_path: Path,
+    variant: str,
+) -> None:
+    path = tmp_path / f"legacy-{variant}.sqlite3"
+    payload = legacy_array_event_payload()
+    updates = payload["head_updates"]
+    details = payload["details"]
+    subject_id = payload["subject_id"]
+    assert isinstance(updates, list)
+    assert isinstance(details, dict)
+    assert isinstance(subject_id, str)
+    assert all(isinstance(item, dict) for item in updates)
+    first_update = updates[0]
+    assert isinstance(first_update, dict)
+    if variant == "duplicate":
+        updates.append(dict(first_update))
+    elif variant == "unsorted":
+        payload["head_updates"] = list(reversed(updates))
+    elif variant == "malformed":
+        first_update["unexpected"] = False
+    elif variant == "free-text-code":
+        details["code"] = "PRIVATE_SOURCE_EXCERPT"
+    elif variant == "free-text-status":
+        details["status"] = "PRIVATE_STATUS_EXCERPT"
+    elif variant == "bad-link":
+        payload["previous_event_id"] = "sha256:" + "e" * 64
+    elif variant == "bad-cas":
+        first_update["expected"] = {
+            "audit_event_id": "sha256:" + "d" * 64,
+            "audit_sequence": 1,
+            "record_id": subject_id,
+        }
+    else:
+        first_update["new_record_id"] = "sha256:" + "f" * 64
+
+    write_legacy_array_store(path, payload=payload)
+    before_bytes = path.read_bytes()
+
+    with pytest.raises(StoreIntegrityError):
+        _store(path)
+
+    assert path.read_bytes() == before_bytes
+
+
+def test_legacy_array_event_id_is_checked_before_object_normalization(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-wrong-object-id.sqlite3"
+    payload = legacy_array_event_payload()
+    updates = payload["head_updates"]
+    assert isinstance(updates, list)
+    object_payload = dict(payload)
+    object_payload["head_updates"] = {
+        item["name"]: {
+            "expected": item["expected"],
+            "new_record_id": item["new_record_id"],
+        }
+        for item in updates
+        if isinstance(item, dict)
+    }
+    object_event_id = record_id("AuditEvent/v1", "v1", object_payload)
+    assert object_event_id != LEGACY_ARRAY_EVENT_ID
+    write_legacy_array_store(path, payload=payload, event_id=object_event_id)
+    before_bytes = path.read_bytes()
+
+    with pytest.raises(StoreIntegrityError):
+        _store(path)
+
+    assert path.read_bytes() == before_bytes
 
 
 def test_audit_event_mutation_is_detected_without_echoing_bytes(tmp_path: Path) -> None:

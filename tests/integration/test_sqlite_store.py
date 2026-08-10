@@ -195,6 +195,8 @@ def test_invalid_audit_logical_time_is_rejected_at_draft_boundary() -> None:
         {"authorization": "secret-value"},
         {"count": 1.5},
         {"code": "bad\ncode"},
+        {"code": "PRIVATE_SOURCE_EXCERPT"},
+        {"status": "PRIVATE_STATUS_EXCERPT"},
     ],
 )
 def test_audit_details_reject_unclassified_string_bytes(
@@ -213,7 +215,7 @@ def test_audit_details_reject_unclassified_string_bytes(
         ("status", "PRIVATE_STATUS_EXCERPT"),
     ],
 )
-def test_audit_details_cannot_persist_arbitrary_identifier_text(
+def test_audit_draft_returns_fresh_details_without_changing_commit_identity(
     tmp_path: Path,
     key: str,
     sentinel: str,
@@ -225,22 +227,29 @@ def test_audit_details_cannot_persist_arbitrary_identifier_text(
         before_bytes = path.read_bytes()
         before_rows = _durable_store_rows(path)
         event = _event(record.record_id)
-        event.details[key] = sentinel
-        observed_error: Exception | None = None
-        try:
-            store.commit(
-                records=(record,),
-                event=event,
-                head_name="checkpoint",
-                expected_head=None,
-                new_head_id=record.record_id,
-            )
-        except (StoreIntegrityError, StoreValidationError) as error:
-            observed_error = error
-        assert store.read_audit_head() is None
-        assert _durable_store_rows(path) == before_rows
-        assert path.read_bytes() == before_bytes
-        assert type(observed_error) is StoreValidationError
+        exposed = event.details
+        exposed[key] = sentinel
+        assert event.details == {}
+        receipt = store.commit(
+            records=(record,),
+            event=event,
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=record.record_id,
+        )
+        retry = store.commit(
+            records=(record,),
+            event=_event(record.record_id),
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=record.record_id,
+        )
+        assert retry == receipt
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_sequence == 1  # type: ignore[union-attr]
+        assert _durable_store_rows(path) != before_rows
+        assert path.read_bytes() != before_bytes
+        assert store.verify_audit().valid is True
 
     assert sentinel.encode("utf-8") not in path.read_bytes()
 
