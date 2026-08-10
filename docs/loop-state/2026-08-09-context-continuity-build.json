@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 27,
+  "revision": 28,
   "contract": {
     "revision": 1,
     "goal": {
@@ -85,7 +85,8 @@
       "Task 4 fix round 2 reproduced the anchored post-genesis local-row attack as RED, then GREEN by requiring every nonempty audit local-values list at sequence 1. The residual test and all 50 focused Task 4/schema tests pass with 12 schemas, strict mypy over 19 source files, Ruff, and diff gates. Fix report sha256:94e8afd79c71fed47813fcb9f8bad700ed36923f963db3afc5538c79f3af912e; full and independent gates remain pending.",
       "Controller reconciliation retained the broader immutable Task 4 review rather than the narrower four-finding stream. Independent round-1 review at sha256:909ff961194eb7d60a0e8f5e11ea63309e76e378a03c16f1262c9a5e29c490c0 found 10 open findings after commit 4246f1e; scoped round-2 review at sha256:4a0c393c88711b6dab92851a319ba7bafbef886fb167a16245595ce7f3965541 closed only post-genesis local-value origin at 7ae7cbd. Findings 1 through 8 and 12 remain open: audit-detail privacy, external state-root confinement, trusted-anchor write admission, frozen schema validation before mutation, reopen rehash, public exports/test boundaries, schema/runtime parity, reorder/link-loss regressions, and default-validator impossible-date rejection.",
       "Task 4 systemic round-3 commit 8bfa1ae passed 100 focused and 375 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable independent review at sha256:52ba9ae8eff87fef80a2f57286ba57018e3ee0be895a04f875b75b12257ca3ea closed six findings but remained FAIL: audit details still persist arbitrary caller text through code/status, target identity drift at the before_commit boundary can occur after a durable commit, and default JSON Schema accepts duplicate head names and over-depth details rejected by runtime. Findings 9 through 11 remain closed.",
-      "Task 4 round-4 commit f01a52d passed 104 focused and 379 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable review at sha256:ace0cf1f9b4b060c2e3cdd7c63431a305136eb06ed2c0cbfe55370533c7d79b2 closed findings 1, 2, and 7 but remained FAIL because the unversioned AuditEvent/v1 head_updates representation changed from array to object, causing a valid pre-round-4 store to fail reopen. The same-UID TOCTOU limitation remains honestly bounded and is not the blocker."
+      "Task 4 round-4 commit f01a52d passed 104 focused and 379 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable review at sha256:ace0cf1f9b4b060c2e3cdd7c63431a305136eb06ed2c0cbfe55370533c7d79b2 closed findings 1, 2, and 7 but remained FAIL because the unversioned AuditEvent/v1 head_updates representation changed from array to object, causing a valid pre-round-4 store to fail reopen. The same-UID TOCTOU limitation remains honestly bounded and is not the blocker.",
+      "Task 4 breaker-round commit f89af77 restores safe legacy AuditEvent/v1 replay and immutable details privacy. Maker evidence passes 118 focused, 393 full, 19 residual, schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Final independent review at sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423 confirms compatibility/privacy but blocks acceptance because AuditEventDraft replaced the documented dataclass field details with _details_bytes, breaking fields, asdict, replace, and positional matching. Five fix rounds are exhausted; Task 5 cannot begin without explicit post-breaker authorization or a public-contract waiver."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -104,7 +105,8 @@
       "Bound sensitive-local origin into audit replay: final table/reference equality is accepted only when all local identities occur in genesis sequence 1, so an anchored suffix cannot introduce a late local row.",
       "Reconciled Task 4 controller state to preserve the superset of independently reproduced findings; narrower review evidence cannot erase broader unresolved security gates.",
       "Narrowed Task 4 round-4 scope to three independently reproduced public-boundary defects: closed audit code/status values, pre-commit target identity admission, and default-schema duplicate/depth parity.",
-      "Narrowed breaker round 5 to backward-compatible replay of safe legacy array-form AuditEvent/v1 bytes while keeping new public schema/object form strict and preserving frozen-model defensive snapshots."
+      "Narrowed breaker round 5 to backward-compatible replay of safe legacy array-form AuditEvent/v1 bytes while keeping new public schema/object form strict and preserving frozen-model defensive snapshots.",
+      "Stopped at the five-round breaker with one public dataclass-reflection regression; did not silently waive the planned AuditEventDraft field contract or begin dependent Task 5."
     ]
   },
   "gates": [
@@ -152,19 +154,21 @@
     "limits": {
       "retries_per_failure_fingerprint": 2,
       "rehydration_attempts_per_transition": 3,
-      "implementation_plan_tasks": 38
+      "implementation_plan_tasks": 38,
+      "task4_fix_rounds": 5
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 4
+      "implementation_plan_tasks": 4,
+      "task4_fix_rounds": 5
     }
   },
   "failure_fingerprint": {
     "gate": "plan1.task4.independent_review",
-    "symptom": "Valid pre-round-4 AuditEvent/v1 stores fail reopen because replay rejects the legacy array-form head_updates after an unversioned object-form representation change.",
-    "evidence_signature": "sha256:ace0cf1f9b4b060c2e3cdd7c63431a305136eb06ed2c0cbfe55370533c7d79b2",
-    "hypothesis": "A compatibility replay path that validates legacy array uniqueness/order and hashes its original payload form, while new writes and public schema remain strict object-form, restores frozen v1 reopen without re-enabling unsafe details or duplicate public input."
+    "symptom": "AuditEventDraft no longer preserves its documented public dataclass field contract: details became _details_bytes, breaking dataclasses fields, asdict, replace, repr shape, and positional pattern matching.",
+    "evidence_signature": "sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423",
+    "hypothesis": "A custom frozen dataclass representation can keep details as the declared public field while storing canonical private bytes behind descriptor or attribute access semantics that return deep fresh copies; authorization is required because the five-round breaker is exhausted."
   },
-  "next_action": "Run Task 4 breaker fix round 5 for frozen AuditEvent/v1 compatibility, then obtain final scoped immutable review or stop Task 4 as blocked.",
-  "verdict": "IN_PROGRESS"
+  "next_action": "Await explicit Thomas authorization for one surgical post-breaker compatibility round, or an explicit waiver of AuditEventDraft dataclass reflection compatibility.",
+  "verdict": "BLOCKED"
 }
