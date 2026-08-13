@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 32,
+  "revision": 33,
   "contract": {
     "revision": 3,
     "goal": {
@@ -104,6 +104,7 @@
       "Task 4 systemic round-3 commit 8bfa1ae passed 100 focused and 375 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable independent review at sha256:52ba9ae8eff87fef80a2f57286ba57018e3ee0be895a04f875b75b12257ca3ea closed six findings but remained FAIL: audit details still persist arbitrary caller text through code/status, target identity drift at the before_commit boundary can occur after a durable commit, and default JSON Schema accepts duplicate head names and over-depth details rejected by runtime. Findings 9 through 11 remain closed.",
       "Task 4 round-4 commit f01a52d passed 104 focused and 379 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable review at sha256:ace0cf1f9b4b060c2e3cdd7c63431a305136eb06ed2c0cbfe55370533c7d79b2 closed findings 1, 2, and 7 but remained FAIL because the unversioned AuditEvent/v1 head_updates representation changed from array to object, causing a valid pre-round-4 store to fail reopen. The same-UID TOCTOU limitation remains honestly bounded and is not the blocker.",
       "Task 4 breaker-round commit f89af77 restores safe legacy AuditEvent/v1 replay and immutable details privacy. Maker evidence passes 118 focused, 393 full, 19 residual, schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Final independent review at sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423 confirms compatibility/privacy but blocks acceptance because AuditEventDraft replaced the documented dataclass field details with _details_bytes, breaking fields, asdict, replace, and positional matching. Five fix rounds are exhausted; Task 5 cannot begin without explicit post-breaker authorization or a public-contract waiver.",
+      "On 2026-08-14 Thomas selected execution option 1, authorizing subagent-driven development and one post-breaker Task 4 remediation cycle without waiving the public dataclass defect. The admitted slice is public-regression RED, minimal compatibility-preserving implementation, current Task 4 gates, and one independent immutable review; Task 5 remains blocked until that review passes.",
       "On 2026-08-13 Thomas approved category-correct benchmarking, zero-waiver production gates, the best-in-tested-scope claim rule, a public development corpus plus sealed holdout, and Python 3.11-3.14 across macOS/Linux/Windows. The approval authorizes design artifacts; written-specification review remains the implementation-planning gate.",
       "Fresh installed-wheel proof on 2026-08-13 built and imported agent-continuity-guard 0.1.0.dev0 under Python 3.12, while installed acg --help exited 1 with ModuleNotFoundError for agent_continuity.cli.",
       "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md."
@@ -127,6 +128,7 @@
       "Narrowed Task 4 round-4 scope to three independently reproduced public-boundary defects: closed audit code/status values, pre-commit target identity admission, and default-schema duplicate/depth parity.",
       "Narrowed breaker round 5 to backward-compatible replay of safe legacy array-form AuditEvent/v1 bytes while keeping new public schema/object form strict and preserving frozen-model defensive snapshots.",
       "Stopped at the five-round breaker with one public dataclass-reflection regression; did not silently waive the planned AuditEventDraft field contract or begin dependent Task 5.",
+      "Admitted one post-breaker Task 4 remediation cycle after explicit operator selection of subagent-driven execution; the defect remains load-bearing and no waiver, relabeling, or downstream execution is authorized.",
       "Amended the success contract without waiving historical failures: production readiness and comparative superiority are separate, category-correct, zero-waiver gates.",
       "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning.",
       "Thomas approved the written specification and then explicitly added U-shaped lost-in-the-middle containment as the next objective using the already described canonical-projection, structured-probe, verified-transition architecture.",
@@ -180,20 +182,30 @@
       "retries_per_failure_fingerprint": 2,
       "rehydration_attempts_per_transition": 3,
       "implementation_plan_tasks": 38,
-      "task4_fix_rounds": 5
+      "task4_fix_rounds": 5,
+      "task4_post_breaker_attempts": 1,
+      "task4_post_breaker_reviews": 1,
+      "retrieval_units": 8,
+      "tree_branches": 3,
+      "self_refine_passes": 2
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
       "implementation_plan_tasks": 4,
-      "task4_fix_rounds": 5
+      "task4_fix_rounds": 5,
+      "task4_post_breaker_attempts": 0,
+      "task4_post_breaker_reviews": 0,
+      "retrieval_units": 6,
+      "tree_branches": 3,
+      "self_refine_passes": 1
     }
   },
   "failure_fingerprint": {
-    "gate": "implementation.execution_mode_selection",
-    "symptom": "Product implementation has not started because the written plan requires the user to choose subagent-driven or inline execution.",
-    "evidence_signature": "docs/superpowers/plans/2026-08-13-lost-in-the-middle-containment.md",
-    "hypothesis": "The selected execution mode will begin with prerequisite public-contract regression tests and preserve dependency and independent-review gates."
+    "gate": "foundation.task4.public_dataclass_contract",
+    "symptom": "AuditEventDraft no longer declares public dataclass field details and breaks fields, asdict, replace, and positional matching.",
+    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-4-rereview-round-5.md",
+    "hypothesis": "A real public details dataclass field can retain canonical private storage and fresh-copy reads while restoring standard dataclass semantics."
   },
-  "next_action": "Obtain the user's execution-mode choice, then start prerequisite public-contract regression tests before any lost-in-the-middle benchmark implementation.",
+  "next_action": "Create the approved isolated worktree, run baseline gates, then dispatch one TDD maker for the Task 4 public dataclass contract and one independent checker over the immutable repair range.",
   "verdict": "IN_PROGRESS"
 }
