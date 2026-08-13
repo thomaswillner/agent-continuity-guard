@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol, cast
 
 from agent_continuity.kernel.audit import AuditAnchorV1, AuditVerification
@@ -171,7 +171,7 @@ class AuditEventDraft:
     kind: str
     subject_id: RecordId
     logical_time: LogicalTime
-    _details_bytes: bytes = field(repr=False)
+    details: JsonObject
 
     def __init__(
         self,
@@ -203,13 +203,14 @@ class AuditEventDraft:
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "subject_id", subject_id)
         object.__setattr__(self, "logical_time", logical_time)
-        object.__setattr__(self, "_details_bytes", canonical_bytes(normalized))
+        object.__setattr__(self, "details", canonical_bytes(normalized))
 
-    @property
-    def details(self) -> JsonObject:
-        """Return a fresh copy of immutable canonical audit details."""
+    def __getattribute__(self, name: str) -> object:
+        value = object.__getattribute__(self, name)
+        if name == "details":
+            return canonical_loads(cast(bytes, value))
 
-        return canonical_loads(self._details_bytes)
+        return value
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, asdict, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +72,101 @@ def _durable_store_rows(path: Path) -> dict[str, list[tuple[Any, ...]]]:
                 "heads",
             )
         }
+
+
+def test_audit_event_draft_preserves_public_dataclass_semantics() -> None:
+    record = _record("public-dataclass")
+    first_digest = digest_bytes(b"first")
+    second_digest = digest_bytes(b"second")
+    caller_details: dict[str, Any] = {"items": [{"digest": first_digest}]}
+    event = _event(record.record_id, caller_details)
+
+    assert tuple(item.name for item in fields(event)) == (
+        "kind",
+        "subject_id",
+        "logical_time",
+        "details",
+    )
+    assert asdict(event) == {
+        "kind": "checkpoint",
+        "subject_id": record.record_id,
+        "logical_time": LOGICAL_TIME,
+        "details": {"items": [{"digest": first_digest}]},
+    }
+    assert event.__match_args__ == (
+        "kind",
+        "subject_id",
+        "logical_time",
+        "details",
+    )
+    match event:
+        case AuditEventDraft(kind, subject_id, logical_time, details):
+            assert (kind, subject_id, logical_time, details) == (
+                "checkpoint",
+                record.record_id,
+                LOGICAL_TIME,
+                {"items": [{"digest": first_digest}]},
+            )
+
+    assert replace(event) == event
+    replacement = replace(
+        event,
+        details={"items": [{"digest": second_digest}]},
+    )
+    caller_details["items"][0]["digest"] = second_digest
+    first_read = event.details
+    second_read = event.details
+    first_read["items"][0]["digest"] = second_digest  # type: ignore[index]
+
+    assert first_read is not second_read
+    assert first_read["items"] is not second_read["items"]
+    assert event.details == {"items": [{"digest": first_digest}]}
+    assert replacement.details == {"items": [{"digest": second_digest}]}
+
+
+def test_public_dataclass_copies_cannot_change_persisted_exact_retry(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "public-dataclass.sqlite3"
+    record = _record("public-dataclass-persistence")
+    original_digest = digest_bytes(b"original")
+    mutated_digest = digest_bytes(b"mutated")
+    caller_details: dict[str, Any] = {"items": [{"digest": original_digest}]}
+    event = _event(record.record_id, caller_details)
+
+    caller_details["items"][0]["digest"] = mutated_digest
+    event.details["items"][0]["digest"] = mutated_digest  # type: ignore[index]
+    event_dict = asdict(event)
+    event_dict["details"]["items"][0]["digest"] = mutated_digest
+
+    with _open_store(path) as store:
+        receipt = store.commit(
+            records=(record,),
+            event=event,
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=record.record_id,
+        )
+        retry = store.commit(
+            records=(record,),
+            event=replace(event),
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=record.record_id,
+        )
+
+        assert retry == receipt
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_sequence == 1  # type: ignore[union-attr]
+
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            "SELECT canonical_bytes FROM audit_events WHERE sequence = 1"
+        ).fetchone()
+    assert row is not None
+    assert json.loads(bytes(row[0]))["details"] == {
+        "items": [{"digest": original_digest}]
+    }
 
 
 def test_genesis_commit_persists_only_approved_typed_local_values(
