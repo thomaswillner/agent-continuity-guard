@@ -1,8 +1,8 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 30,
+  "revision": 32,
   "contract": {
-    "revision": 2,
+    "revision": 3,
     "goal": {
       "outcome": "Deliver a public-safe model-neutral continuity guard that detects context pressure or drift, prepares an atomic handoff, verifies destination rehydration, and preserves meta-handoff lineage.",
       "success_measure": "Approved plans implemented; every required production gate passes without waiver on the full 12-cell Python 3.11 through 3.14 by macOS/Linux/Windows matrix; public, holdout, and combined results independently pass all safety and performance floors; the sealed holdout is the primary superiority endpoint; its complete reproducibility package is published after final result freeze; and any best-in-tested-scope claim is established by the frozen category-correct comparison and statistical rule."
@@ -31,16 +31,18 @@
       ]
     },
     "amendment": {
-      "status": "approved_design_only",
-      "supersedes_revision": 1,
+      "status": "approved_for_implementation_planning",
+      "supersedes_revision": 2,
       "approved_by": "Thomas Willner",
-      "approval_evidence": "User message on 2026-08-13 approving category-correct benchmark, zero-waiver production gates, best-in-tested-scope claim rule, public development corpus plus sealed holdout, and Python 3.11-3.14/macOS/Linux/Windows baseline.",
+      "approval_evidence": "User messages on 2026-08-13 explicitly approving the written specification and directing ACG to tackle U-shaped lost-in-the-middle exactly through external canonical state, structured probes, verified transitions, and bounded claims.",
       "approved_delta": [
         "Replace the synthetic-only success measure with separate zero-waiver production and category-correct superiority gates.",
         "Require a public development corpus plus an independently controlled sealed holdout.",
         "Require Python 3.11 through 3.14 on macOS, Linux, and Windows.",
         "Restrict comparative claims to best in tested scope under a frozen statistical contract.",
-        "Authorize design artifacts only; written-specification approval remains required before implementation planning."
+        "Authorize implementation planning from the committed written specification.",
+        "Contain protected continuity across matched beginning, middle, and end contexts without claiming to change model attention or guarantee arbitrary recall.",
+        "Require zero critical false-PASS and independent safety floors per position bin plus paired middle-versus-edges non-inferiority on public, holdout, and combined results."
       ]
     }
   },
@@ -126,7 +128,10 @@
       "Narrowed breaker round 5 to backward-compatible replay of safe legacy array-form AuditEvent/v1 bytes while keeping new public schema/object form strict and preserving frozen-model defensive snapshots.",
       "Stopped at the five-round breaker with one public dataclass-reflection regression; did not silently waive the planned AuditEventDraft field contract or begin dependent Task 5.",
       "Amended the success contract without waiving historical failures: production readiness and comparative superiority are separate, category-correct, zero-waiver gates.",
-      "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning."
+      "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning.",
+      "Thomas approved the written specification and then explicitly added U-shaped lost-in-the-middle containment as the next objective using the already described canonical-projection, structured-probe, verified-transition architecture.",
+      "RAG confirmed the repository research already requires position randomization and canonical comparison; bounded strategy search rejected prompt duplication and full-history retrieval as trust roots and selected external canonical projections.",
+      "The lost-in-the-middle implementation plan maps the approved containment contract into six dependency-ordered TDD tasks and 33 concrete steps; two Self-Refine passes removed placeholder admission values, interface drift, checker-metadata leakage, undeclared dependencies, mutable block models, ambiguous position measurement, and prerequisite ordering defects."
     ]
   },
   "gates": [
@@ -184,11 +189,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "design.written_specification_review",
-    "symptom": "Implementation planning is not admitted until Thomas reviews the committed written production and benchmark specification.",
-    "evidence_signature": "docs/superpowers/specs/2026-08-13-production-benchmark-design.md",
-    "hypothesis": "Explicit written-specification approval will admit implementation planning without waiving the retained Task 4 public-contract failure."
+    "gate": "implementation.execution_mode_selection",
+    "symptom": "Product implementation has not started because the written plan requires the user to choose subagent-driven or inline execution.",
+    "evidence_signature": "docs/superpowers/plans/2026-08-13-lost-in-the-middle-containment.md",
+    "hypothesis": "The selected execution mode will begin with prerequisite public-contract regression tests and preserve dependency and independent-review gates."
   },
-  "next_action": "Self-review and commit the production/benchmark specification, category-correct ADR, glossary, wargame, and state revision; then request Thomas written-specification approval.",
+  "next_action": "Obtain the user's execution-mode choice, then start prerequisite public-contract regression tests before any lost-in-the-middle benchmark implementation.",
   "verdict": "IN_PROGRESS"
 }

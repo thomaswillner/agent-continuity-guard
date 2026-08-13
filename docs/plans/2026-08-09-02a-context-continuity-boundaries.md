@@ -30,6 +30,7 @@
 - Built-in default generation `2` and all six v2 thresholds are update invariants. Every source update, installed-artifact update, migration, CI aggregate, and release-candidate gate must reproduce the exact canonical v2 default and fail closed if a missing or higher built-in value is observed. Updates append a new policy/default-generation binding rather than mutating historical policy records. An active session bound to retired `conservative-longrun-v1`, a missing default, or a silently raised built-in threshold cannot continue protected work; its next observation requires checkpoint plus compact/handoff into v2 or returns BLOCK. Explicit custom profiles with equal or lower thresholds remain valid. An update may never silently convert an explicit calibrated profile into the built-in default or raise v2; a later higher default requires a new explicit operator amendment and current calibration evidence.
 - Thresholds use integer basis points and integer tokens. Floats are forbidden.
 - Deterministic continuity probes run at bounded cadence even below budget thresholds. The agent must return requested canonical record IDs through a structured adapter result; missing protected IDs, contradictions against canonical records, unknown substitutions, or authority broadening require handoff or BLOCK. Confidence, prose acknowledgment, and self-reported recall never pass a probe.
+- Lost-in-the-middle is contained, not claimed eliminated: protected-state identity and transition comparison are position-independent, while public and sealed benchmark triplets place matched protected facts at beginning, middle, and end. Prompt position is benchmark metadata and never production authority.
 - Task-phase boundaries, high-risk decisions, explicit operator requests, and large tool-output spikes may request an earlier checkpoint or handoff. These event triggers can strengthen but never postpone the action selected by token, reserve, turn, freshness, or probe gates.
 - A retry is informative only when its projection, source observation, checkpoint, or evidence set changes. A repeated identical failure fingerprint blocks immediately.
 - Every accepted handoff appends meta-lineage containing root lineage ID, parent transition, source and destination actor IDs, checkpoint, verified projection, and accepted logical time. Resume state is materialized from the canonical ledger, never by recursively summarizing an earlier handoff summary.
@@ -924,7 +925,7 @@ git commit -m "feat: preserve nested context provenance"
 - Create: `tests/integration/test_context_adapter_flow.py`
 - Create: `tests/security/test_context_external_poisoning.py`
 - Create: `tests/fixtures/context-continuity-benchmark-v1.jsonl`
-- Create: `tools/benchmark_context_continuity.py`
+- Modify: `tools/benchmark_context_continuity.py`
 - Modify: `tools/verify_release.py`
 
 **Interfaces:**
@@ -1014,6 +1015,8 @@ Translation constructs validated immutable models and invokes `ContextContinuity
 It must invoke `tools/verify_context_defaults.py` against source and each installed artifact. The release report binds default generation 2 plus exact 2500/4000/5000 basis points and 16000/24000/32000 token ceilings. Missing, raised, source/wheel-divergent, or migration-unverified defaults fail the aggregate update/release gate.
 
 Freeze a public synthetic benchmark with at least 100 seeded material continuity failures and 100 valid controls spanning required-ID omission, contradiction, authority broadening, stale evidence, actor/checkpoint/lineage substitution, below-threshold probe failure, and clean compaction/restart/handoff cases. `tools/benchmark_context_continuity.py` computes `detected_material_failures / seeded_material_failures` and `false_blocks / valid_controls` using integer counts. Pass requires detection >= 90% and false positives <= 5%. Report corpus version, counts, confusion matrix, and SHA-256; explicitly state that passing measures this frozen synthetic corpus only and is not evidence of universal real-world 90% prevention.
+
+Every protected-field class also receives matched beginning/middle/end variants with one immutable base-case ID. Each position bin independently requires zero critical false-PASS, detection >= 90%, and false blocks <= 5%. A paired bootstrap over base-case IDs uses at least 10,000 replicates; the 95% lower bound for `middle macro-balanced accuracy - mean(beginning, end)` must be >= -0.02. The generator holds expected outcome, distractor multiset, logical workload, and resource budget constant and never exposes position labels or triplet relationships to the product under test.
 
 - [ ] **Step 6: Run GREEN and full v0.1 regression**
 

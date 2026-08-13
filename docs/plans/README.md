@@ -5,6 +5,9 @@ Specification: ../specs/v0.1-design.md
 Accepted context-continuity extension:
 2026-08-09-02a-context-continuity-boundaries.md
 
+Accepted lost-in-the-middle containment extension:
+../superpowers/plans/2026-08-13-lost-in-the-middle-containment.md
+
 Implementation is split into five dependency-ordered plans. Each plan ends in
 working, independently testable software. Plans must execute in order.
 
@@ -34,6 +37,10 @@ working, independently testable software. Plans must execute in order.
    - Context-poison and authority-broadening refusal
    - Bounded nested work scopes with evidence provenance
 
+   Lost-in-the-middle extension Tasks 1-5 execute after this plan's Tasks 1-5
+   and before its Task 6. They add position-matched contracts, scoring, probe and
+   transition containment proof, and isolated corpus execution.
+
 4. 2026-08-08-03-governed-improvement.md
    - Finding persistence and deduplication
    - Bounded additive rule DSL
@@ -48,6 +55,10 @@ working, independently testable software. Plans must execute in order.
    - Cross-platform capability truthfulness
    - Adversarial, crash, concurrency, and installed-wheel tests
    - CI, provenance, packaging, and public-release gates
+
+   Lost-in-the-middle extension Task 6 executes only after this plan passes. It
+   adds claim derivation, full position gates, and exact 12-cell installed-artifact
+   aggregation without weakening any existing release gate.
 
 Acceptance ownership:
 

@@ -12,6 +12,10 @@ _Avoid_: Memory, context persistence
 A material divergence between current agent state or behavior and the verified protected continuity state.
 _Avoid_: Any change, generic model error
 
+**Lost-in-the-middle containment**:
+Preservation or safe refusal of protected continuity when the same required fact appears at the beginning, middle, or end of otherwise equivalent long context. Containment does not claim to remove a model's positional-attention weakness.
+_Avoid_: Solving attention, perfect recall
+
 **Critical false-PASS**:
 A result that permits continuation despite authority broadening, tampering, stale required evidence, lineage substitution, or an invalid protected handoff.
 _Avoid_: False negative

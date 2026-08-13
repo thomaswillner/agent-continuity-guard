@@ -1,12 +1,14 @@
 # Agent Continuity Guard production and benchmark design
 
-Status: approved design decisions; written specification pending user review
+Status: written specification approved by Thomas Willner on 2026-08-13; lost-in-the-middle containment amendment explicitly directed immediately afterward
 
 Date: 2026-08-13
 
 ## 1. Objective
 
 Deliver Agent Continuity Guard (ACG) as a production-ready, vendor-agnostic drift and continuity detector. Establish any superiority claim through a reproducible, category-correct comparison against frozen competitor artifacts and a public development corpus plus an independently controlled sealed holdout.
+
+ACG also targets operational containment of U-shaped lost-in-the-middle failures for protected continuity. It does not alter a model's positional attention. It externalizes protected state, challenges the active context with structured canonical-identity probes, requires a verified checkpoint before compaction/restart/handoff, rebuilds a concise projection from canonical records, and refuses ordinary continuation until exact rehydration comparison passes.
 
 Production readiness and comparative superiority are separate gates:
 
@@ -23,6 +25,7 @@ Production readiness and comparative superiority are separate gates:
 - Support and verify the full 12-cell matrix of Python 3.11, 3.12, 3.13, and 3.14 on macOS, Linux, and Windows.
 - Keep the core contract provider, model, operating-system, harness, and tool neutral.
 - Keep provider-specific and harness-native adapters outside the neutral core and evaluate them in named lanes.
+- Treat lost-in-the-middle as a tested containment problem, not a perfect-memory or model-internals claim.
 
 ## 3. Current baseline and required remediation
 
@@ -61,6 +64,8 @@ The neutral core owns:
 - benchmark case, observation, and result schemas.
 
 The neutral core does not import provider SDKs, inspect provider configuration, call models, install hooks, select operational loops, or grant authority.
+
+Prompt position is not a trusted production field. The same canonical record identity and comparison rule applies whether narrative appeared at the beginning, middle, or end of provider context. Retrieval results, summaries, acknowledgements, and repeated prompts are advisory inputs only.
 
 ### 4.2 Capture and store adapters
 
@@ -128,6 +133,8 @@ Every `BenchmarkCase/v1` is content-addressed and contains only neutral data:
 - resource budget and platform applicability;
 - public-development or sealed-holdout partition marker without revealing holdout labels.
 
+Lost-in-the-middle cases form immutable triplets with one base-case ID and `beginning`, `middle`, and `end` variants. Variants preserve the protected fact, expected decision, total logical workload, distractor multiset, and resource budget; only deterministic placement and order permitted by the frozen generator differ. Position is measured against exact product-visible input bytes: beginning ends at or before 20%, middle lies within 40%-60%, and end starts at or after 80%. If an exact product tokenizer is available and identity-bound, token offsets are recorded as an additional metric; without that evidence the claim is byte-layout containment, not model-token-position containment. Literal, paraphrased, update-over-time, multi-hop, and conflicting-evidence families are stratified separately. Products never receive expected labels, base-triplet relationships, or position labels during execution.
+
 Case order is randomized from a committed seed after artifact freeze. Products receive identical logical cases and budgets within a lane.
 
 ### 6.2 Public development corpus
@@ -145,6 +152,7 @@ The repository contains at least 100 seeded material failures and 100 valid cont
 - code-state staleness and unrelated-change controls;
 - lexical paraphrase, vocabulary shift, multilingual text, and adversarial overlap;
 - empty, malformed, oversized, and resource-exhaustion cases.
+- paired beginning/middle/end placement of every protected-field class under matched distractor load.
 
 Labels, generator code, corpus digest, and expected public results are reviewable. Threshold tuning and implementation iteration may use only this partition.
 
@@ -178,6 +186,8 @@ Comparison is lexicographic:
 
 The first two safety floors and every predeclared performance floor must pass separately on the public development corpus, the sealed holdout, and their combined results. A combined pass cannot mask a partition failure. The public corpus establishes development readiness; the sealed holdout is the primary superiority endpoint. A product that overblocks benign controls fails the false-block floor. A product that returns `UNKNOWN` for all cases cannot win.
 
+For the lost-in-the-middle stratum, zero critical false-PASS, detection at least 90 percent, and false blocks at most 5 percent must also pass independently in each `beginning`, `middle`, and `end` bin. Using paired immutable base-case IDs and at least 10,000 bootstrap replicates, middle-position macro-balanced accuracy must be non-inferior to the mean of beginning and end: the lower bound of the 95 percent interval for `middle - mean(edges)` must be at least `-0.02`. Failure produces a position-sensitive limitation, not a containment claim.
+
 ### 7.3 Statistical rule
 
 The scorer uses paired bootstrap resampling over immutable holdout case IDs with a predeclared deterministic seed and at least 10,000 replicates. ACG wins the primary endpoint only when:
@@ -200,6 +210,7 @@ Otherwise the comparison is a tie or loss. Multiple direct competitors require H
 - deterministic repeatability;
 - macOS, Linux, Windows, and Python-version coverage;
 - target mutation and external side effects.
+- beginning/middle/end confusion matrices, paired position deltas, and post-failure recovery outcomes.
 
 Secondary metrics may break an otherwise exact tie only under a predeclared ordering. They cannot compensate for a failed safety floor.
 
@@ -227,6 +238,7 @@ No release candidate exists until all gates pass on the exact installed artifact
 18. sealed holdout safety and performance floors pass independently, combined-result floors pass, and the frozen holdout primary endpoint has a tie, loss, or win verdict;
 19. final source tree and release artifact contain no private residue or holdout leakage;
 20. aggregate release verifier reports no required `BLOCK`, `UNKNOWN`, omission, or stale evidence.
+21. lost-in-the-middle triplets pass every per-position floor and the paired middle-versus-edges non-inferiority rule on public, holdout, and combined results.
 
 Every gate names raw proof. A planned test, a source edit, CI configuration, or a maker assertion is not passing evidence.
 
@@ -290,6 +302,8 @@ Forbidden:
 - zero false positives without naming corpus and confidence interval.
 
 If the holdout primary interval or practical threshold does not establish a win, the report says tie or loss. If any public, holdout, or combined safety or performance floor fails, no superiority claim is emitted. If the complete post-freeze holdout reproducibility package cannot be published, the report may state an independent certification but cannot claim "best in tested scope."
+
+A lost-in-the-middle containment claim is separate from comparative superiority. It must name tested artifacts, lanes, context layouts and lengths, position bins, workload strata, recovery protocol, and evaluation date. Permitted wording is "contained protected continuity across the tested beginning/middle/end cases." Forbidden wording includes "solves transformer attention," "perfect long-context recall," and "remembers everything."
 
 ## 13. Delivery sequence
 
