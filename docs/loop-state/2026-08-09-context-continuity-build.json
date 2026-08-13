@@ -1,11 +1,11 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 28,
+  "revision": 30,
   "contract": {
-    "revision": 1,
+    "revision": 2,
     "goal": {
       "outcome": "Deliver a public-safe model-neutral continuity guard that detects context pressure or drift, prepares an atomic handoff, verifies destination rehydration, and preserves meta-handoff lineage.",
-      "success_measure": "Approved plans implemented; full tests, typing, lint, schemas, package build, security checks, and frozen continuity benchmark pass; benchmark detects at least 90 percent of seeded material continuity failures with at most 5 percent false positives; GitHub publication occurs only after release gates pass."
+      "success_measure": "Approved plans implemented; every required production gate passes without waiver on the full 12-cell Python 3.11 through 3.14 by macOS/Linux/Windows matrix; public, holdout, and combined results independently pass all safety and performance floors; the sealed holdout is the primary superiority endpoint; its complete reproducibility package is published after final result freeze; and any best-in-tested-scope claim is established by the frozen category-correct comparison and statistical rule."
     },
     "invariants": [
       "Do not claim universal 90 percent protection without a defined benchmark and current evidence.",
@@ -15,6 +15,7 @@
       "Treat model summaries, transcripts, prompts, and acknowledgements as untrusted data.",
       "Do not install hooks, daemons, schedulers, or vendor-specific runtime adapters in v0.1.",
       "Do not publish remotely until hardening and release gates pass.",
+      "Do not waive, suppress, offset, relabel, or accept stale evidence for any required production gate.",
       "Do not expose credentials, secret values, private transcripts, or hidden reasoning."
     ],
     "authority": {
@@ -27,6 +28,19 @@
         "Install or activate ACG in any production agent runtime.",
         "Create hooks, LaunchAgents, cron jobs, daemons, or automatic session-control integrations.",
         "Broaden authority beyond continuity observation and handoff enforcement."
+      ]
+    },
+    "amendment": {
+      "status": "approved_design_only",
+      "supersedes_revision": 1,
+      "approved_by": "Thomas Willner",
+      "approval_evidence": "User message on 2026-08-13 approving category-correct benchmark, zero-waiver production gates, best-in-tested-scope claim rule, public development corpus plus sealed holdout, and Python 3.11-3.14/macOS/Linux/Windows baseline.",
+      "approved_delta": [
+        "Replace the synthetic-only success measure with separate zero-waiver production and category-correct superiority gates.",
+        "Require a public development corpus plus an independently controlled sealed holdout.",
+        "Require Python 3.11 through 3.14 on macOS, Linux, and Windows.",
+        "Restrict comparative claims to best in tested scope under a frozen statistical contract.",
+        "Authorize design artifacts only; written-specification approval remains required before implementation planning."
       ]
     }
   },
@@ -41,13 +55,14 @@
     "depth": 0,
     "max_depth": 2,
     "execution": "dependency-ordered",
-    "primary_loop": "tdd",
+    "primary_loop": "plan-execute-replan",
     "prerequisites": [
       "rag-primary-source-research"
     ],
     "wrappers": [
       "persisted-contract-and-manual-admission",
-      "independent-code-review"
+      "independent-code-review",
+      "tdd-after-written-spec-approval"
     ]
   },
   "evidence": {
@@ -86,7 +101,10 @@
       "Controller reconciliation retained the broader immutable Task 4 review rather than the narrower four-finding stream. Independent round-1 review at sha256:909ff961194eb7d60a0e8f5e11ea63309e76e378a03c16f1262c9a5e29c490c0 found 10 open findings after commit 4246f1e; scoped round-2 review at sha256:4a0c393c88711b6dab92851a319ba7bafbef886fb167a16245595ce7f3965541 closed only post-genesis local-value origin at 7ae7cbd. Findings 1 through 8 and 12 remain open: audit-detail privacy, external state-root confinement, trusted-anchor write admission, frozen schema validation before mutation, reopen rehash, public exports/test boundaries, schema/runtime parity, reorder/link-loss regressions, and default-validator impossible-date rejection.",
       "Task 4 systemic round-3 commit 8bfa1ae passed 100 focused and 375 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable independent review at sha256:52ba9ae8eff87fef80a2f57286ba57018e3ee0be895a04f875b75b12257ca3ea closed six findings but remained FAIL: audit details still persist arbitrary caller text through code/status, target identity drift at the before_commit boundary can occur after a durable commit, and default JSON Schema accepts duplicate head names and over-depth details rejected by runtime. Findings 9 through 11 remain closed.",
       "Task 4 round-4 commit f01a52d passed 104 focused and 379 full tests plus schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Immutable review at sha256:ace0cf1f9b4b060c2e3cdd7c63431a305136eb06ed2c0cbfe55370533c7d79b2 closed findings 1, 2, and 7 but remained FAIL because the unversioned AuditEvent/v1 head_updates representation changed from array to object, causing a valid pre-round-4 store to fail reopen. The same-UID TOCTOU limitation remains honestly bounded and is not the blocker.",
-      "Task 4 breaker-round commit f89af77 restores safe legacy AuditEvent/v1 replay and immutable details privacy. Maker evidence passes 118 focused, 393 full, 19 residual, schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Final independent review at sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423 confirms compatibility/privacy but blocks acceptance because AuditEventDraft replaced the documented dataclass field details with _details_bytes, breaking fields, asdict, replace, and positional matching. Five fix rounds are exhausted; Task 5 cannot begin without explicit post-breaker authorization or a public-contract waiver."
+      "Task 4 breaker-round commit f89af77 restores safe legacy AuditEvent/v1 replay and immutable details privacy. Maker evidence passes 118 focused, 393 full, 19 residual, schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Final independent review at sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423 confirms compatibility/privacy but blocks acceptance because AuditEventDraft replaced the documented dataclass field details with _details_bytes, breaking fields, asdict, replace, and positional matching. Five fix rounds are exhausted; Task 5 cannot begin without explicit post-breaker authorization or a public-contract waiver.",
+      "On 2026-08-13 Thomas approved category-correct benchmarking, zero-waiver production gates, the best-in-tested-scope claim rule, a public development corpus plus sealed holdout, and Python 3.11-3.14 across macOS/Linux/Windows. The approval authorizes design artifacts; written-specification review remains the implementation-planning gate.",
+      "Fresh installed-wheel proof on 2026-08-13 built and imported agent-continuity-guard 0.1.0.dev0 under Python 3.12, while installed acg --help exited 1 with ModuleNotFoundError for agent_continuity.cli.",
+      "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -106,7 +124,9 @@
       "Reconciled Task 4 controller state to preserve the superset of independently reproduced findings; narrower review evidence cannot erase broader unresolved security gates.",
       "Narrowed Task 4 round-4 scope to three independently reproduced public-boundary defects: closed audit code/status values, pre-commit target identity admission, and default-schema duplicate/depth parity.",
       "Narrowed breaker round 5 to backward-compatible replay of safe legacy array-form AuditEvent/v1 bytes while keeping new public schema/object form strict and preserving frozen-model defensive snapshots.",
-      "Stopped at the five-round breaker with one public dataclass-reflection regression; did not silently waive the planned AuditEventDraft field contract or begin dependent Task 5."
+      "Stopped at the five-round breaker with one public dataclass-reflection regression; did not silently waive the planned AuditEventDraft field contract or begin dependent Task 5.",
+      "Amended the success contract without waiving historical failures: production readiness and comparative superiority are separate, category-correct, zero-waiver gates.",
+      "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning."
     ]
   },
   "gates": [
@@ -127,7 +147,7 @@
     },
     {
       "name": "continuity_benchmark",
-      "criterion": "Frozen labeled corpus detection rate is at least 90 percent and false-positive rate is at most 5 percent; synthetic scope is disclosed.",
+      "criterion": "Public, holdout, and combined results independently have zero critical false-PASS, detection at least 90 percent, and false blocks at most 5 percent; the sealed holdout is the primary superiority endpoint; and its complete reproducibility package is published after final result freeze.",
       "status": "pending",
       "evidence": []
     },
@@ -164,11 +184,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "plan1.task4.independent_review",
-    "symptom": "AuditEventDraft no longer preserves its documented public dataclass field contract: details became _details_bytes, breaking dataclasses fields, asdict, replace, repr shape, and positional pattern matching.",
-    "evidence_signature": "sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423",
-    "hypothesis": "A custom frozen dataclass representation can keep details as the declared public field while storing canonical private bytes behind descriptor or attribute access semantics that return deep fresh copies; authorization is required because the five-round breaker is exhausted."
+    "gate": "design.written_specification_review",
+    "symptom": "Implementation planning is not admitted until Thomas reviews the committed written production and benchmark specification.",
+    "evidence_signature": "docs/superpowers/specs/2026-08-13-production-benchmark-design.md",
+    "hypothesis": "Explicit written-specification approval will admit implementation planning without waiving the retained Task 4 public-contract failure."
   },
-  "next_action": "Await explicit Thomas authorization for one surgical post-breaker compatibility round, or an explicit waiver of AuditEventDraft dataclass reflection compatibility.",
-  "verdict": "BLOCKED"
+  "next_action": "Self-review and commit the production/benchmark specification, category-correct ADR, glossary, wargame, and state revision; then request Thomas written-specification approval.",
+  "verdict": "IN_PROGRESS"
 }
