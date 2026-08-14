@@ -16,6 +16,9 @@ from agent_continuity.kernel.canonical import (
     canonical_bytes,
     validate_logical_time,
 )
+from agent_continuity.kernel.checkpoint import verification_result_payload
+from agent_continuity.kernel.evaluation import EvaluationResult, Verdict
+from agent_continuity.kernel.findings import Finding
 from agent_continuity.kernel.model import (
     AssignmentAuthority,
     Digest,
@@ -209,6 +212,25 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
             build_ruleset(_record_ids(instance["rule_ids"]))
         elif name == "checkpoint.schema.json":
             validate_checkpoint_runtime_payload(instance)
+        elif name == "verification-result.schema.json":
+            findings = tuple(
+                Finding(
+                    code=item["code"],
+                    verdict=Verdict(item["verdict"]),
+                    subject_id=RecordId(item["subject_id"]),
+                    message_id=item["message_id"],
+                    parameters=item["parameters"],
+                    integrity_failure=item["integrity_failure"],
+                )
+                for item in instance["findings"]
+            )
+            result = EvaluationResult(
+                verdict=Verdict(instance["verdict"]),
+                transition_allowed=instance["transition_allowed"],
+                findings=findings,
+            )
+            if verification_result_payload(result) != instance:
+                raise SchemaVerificationError("invalid_instance")
     except (CanonicalJSONError, KeyError, TypeError, ValueError) as error:
         raise SchemaVerificationError("invalid_instance") from error
 
@@ -428,6 +450,12 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "worktree_manifest_digest": digest,
         },
         "unresolved-item.schema.json": {"code": "unknown", "digest": None},
+        "verification-result.schema.json": {
+            "findings": [],
+            "schema": "VerificationResult/v1",
+            "transition_allowed": True,
+            "verdict": "pass",
+        },
         "work-item.schema.json": {
             "digest": digest,
             "kind": "task",

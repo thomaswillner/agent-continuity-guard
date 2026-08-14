@@ -1,0 +1,18 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/verification-result.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "findings": {
+      "items": {"$ref": "https://agent-continuity-guard.dev/schemas/v1/finding.schema.json"},
+      "type": "array"
+    },
+    "schema": {"const": "VerificationResult/v1"},
+    "transition_allowed": {"type": "boolean"},
+    "verdict": {"enum": ["pass", "warn", "unknown", "block"]}
+  },
+  "required": ["findings", "schema", "transition_allowed", "verdict"],
+  "title": "VerificationResult/v1",
+  "type": "object",
+  "x-record-type": "VerificationResult/v1"
+}

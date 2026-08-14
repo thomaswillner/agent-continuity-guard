@@ -54,6 +54,7 @@ SCHEMA_REGISTRY: dict[str, str] = {
     "Ruleset/v1": "ruleset.schema.json",
     "TargetIdentity/v1": "target-identity.schema.json",
     "UnresolvedItem/v1": "unresolved-item.schema.json",
+    "VerificationResult/v1": "verification-result.schema.json",
     "WorkItem/v1": "work-item.schema.json",
 }
 
