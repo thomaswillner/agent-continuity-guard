@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 37,
+  "revision": 38,
   "contract": {
     "revision": 3,
     "goal": {
@@ -109,6 +109,7 @@
       "Task 5 commits 4f73cdf, d8ec27a, and b90840a implement strict descriptor-pinned TOML policy compilation, canonical Policy/v1 identity, built-in guard defaults, strict public model/schema parity, sanitized errors, fail-closed no-follow reads, target-read-only precedence, and canonical template output. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 453 full and 91 focused tests, strict mypy, Ruff, 14 schemas, clean-wheel policy smoke, exact ten-path inventory, three DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 8e2caf00f6dc0868edc11dc90e0d4b8c69e87165.",
       "Task 6 commits 1d28d26, bf8ec60, and 68c9430 implement public Continuity initialization, pure content-addressed genesis records, A/B/C drift refusal, cross-process exact idempotency, linked-worktree Git metadata exclusion, nested identity validation, sanitized request errors, and exhaustive semantic schema admission. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 498 full and 79 focused tests, strict mypy, Ruff, 23 schemas, clean-wheel initialization/idempotency smoke, exact 17-path inventory, three DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 6dc9a046cab7230a061f51cccbaa7ad03a80980e.",
       "Task 7 commits a03a3b3, 2a8d505, and c291aef implement parent-linked subsequent checkpoints, per-invocation CAS identity, reason-digest-only audit binding, pure latest/explicit verification, VerificationResult/v1 serialization, lazy public exports, and mechanically enforced kernel import purity. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 525 full and 72 focused tests, strict mypy, Ruff, 24 schemas, clean installed-wheel kernel/root/checkpoint/verify and target/store invariance smoke, zero runtime dependencies, MIT metadata and bundled license, exact nine-path inventory, three DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree ba0bea5f4e3285fdf914e9efb2092198f3168d76.",
+      "Task 8 commits e9f631f, c2acba0, 17d3802, eeab9af, and ef8a622 implement the installed `acg` command tree, canonical success/error output, stable exit mapping, Error/v1, exclusive 0600 descriptor-pinned anchor export, audit verification, and hardened alias, rename, reparent, fsync, close, cleanup, and request/integrity boundaries. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 536 full and 82 focused/affected tests, strict mypy, Ruff, 25 schemas, fresh installed-wheel all-command smoke with exits 0/1/2/3, canonical output, target/store invariance, exact seven-path inventory, five DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 347b21bbb5a806aad1384dc0b4d872e1c047a456.",
       "On 2026-08-13 Thomas approved category-correct benchmarking, zero-waiver production gates, the best-in-tested-scope claim rule, a public development corpus plus sealed holdout, and Python 3.11-3.14 across macOS/Linux/Windows. The approval authorizes design artifacts; written-specification review remains the implementation-planning gate.",
       "Fresh installed-wheel proof on 2026-08-13 built and imported agent-continuity-guard 0.1.0.dev0 under Python 3.12, while installed acg --help exited 1 with ModuleNotFoundError for agent_continuity.cli.",
       "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md."
@@ -137,6 +138,7 @@
       "Closed Task 5 without waiver after component-pinned path, traceback sanitization, runtime/schema parity, public request-exit, full identity mutation, and missing-no-follow regressions passed independent review and installed-wheel verification.",
       "Closed Task 6 without waiver after real two-process races, common Git-directory overlap, full checkpoint semantic admission, forged child identity, missing-target sanitization, target-read-only, one-event genesis, and installed-wheel idempotency passed independent review.",
       "Closed Task 7 without waiver after identical concurrent checkpoint invocations, fresh-parent CAS retry, standard-import kernel purity, relative-import and API escape enforcement, reason privacy, policy identity drift, target/store write invariance, and installed-wheel latest/explicit verification passed independent review and controller reproduction.",
+      "Closed Task 8 without waiver after macOS path aliases, same-UID parent swaps and reparenting, directory fsync and output-close EIO cleanup, invalid audit anchors, request/error exit mapping, canonical output, target/store invariance, and installed-wheel command execution passed independent review and controller reproduction.",
       "Amended the success contract without waiving historical failures: production readiness and comparative superiority are separate, category-correct, zero-waiver gates.",
       "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning.",
       "Thomas approved the written specification and then explicitly added U-shaped lost-in-the-middle containment as the next objective using the already described canonical-projection, structured-probe, verified-transition architecture.",
@@ -199,7 +201,7 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 7,
+      "implementation_plan_tasks": 8,
       "task4_fix_rounds": 5,
       "task4_post_breaker_attempts": 1,
       "task4_post_breaker_reviews": 1,
@@ -209,11 +211,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "foundation.task8.cli",
-    "symptom": "The installed `acg` entry point still lacks the planned policy, initialization, checkpoint, verification, audit, and anchor command adapter with canonical output and stable exit mapping.",
-    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-8-brief.md",
-    "hypothesis": "A thin argparse and canonical-output adapter over the accepted facade/store seams can expose Plan 1 without weakening request, transition, integrity, target-read-only, or stdout contracts."
+    "gate": "foundation.task9.installed_plan1",
+    "symptom": "Plan 1 lacks one installed-wheel end-to-end proof covering every command, target-write invariance, anchor truncation/tamper detection, overlap refusal, persisted-byte privacy, and truthful public documentation.",
+    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-9-brief.md",
+    "hypothesis": "Installed-wheel subprocess tests over a clean Git fixture can prove the accepted package and CLI composition without relying on source-tree imports or mutating protected target state."
   },
-  "next_action": "Dispatch a fresh TDD maker for Foundation Task 8 CLI and canonical output, then independently review the exact maker range before Task 9.",
+  "next_action": "Dispatch a fresh TDD maker for Foundation Task 9 installed Plan 1 proof, then run the Plan 1 completion gate and independent whole-plan review.",
   "verdict": "IN_PROGRESS"
 }
