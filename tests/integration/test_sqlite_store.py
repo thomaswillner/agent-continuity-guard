@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import json
+import pickle
 import sqlite3
 from dataclasses import FrozenInstanceError, asdict, fields, replace
 from pathlib import Path
@@ -109,10 +111,11 @@ def test_audit_event_draft_preserves_public_dataclass_semantics() -> None:
             )
 
     assert replace(event) == event
-    replacement = replace(
-        event,
-        details={"items": [{"digest": second_digest}]},
-    )
+    replacement_details: dict[str, Any] = {
+        "items": [{"digest": second_digest}]
+    }
+    replacement = replace(event, details=replacement_details)
+    replacement_details["items"][0]["digest"] = first_digest
     caller_details["items"][0]["digest"] = second_digest
     first_read = event.details
     second_read = event.details
@@ -122,6 +125,58 @@ def test_audit_event_draft_preserves_public_dataclass_semantics() -> None:
     assert first_read["items"] is not second_read["items"]
     assert event.details == {"items": [{"digest": first_digest}]}
     assert replacement.details == {"items": [{"digest": second_digest}]}
+
+
+def test_copy_deepcopy_and_pickle_reconstruct_public_audit_snapshot(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "public-dataclass-reconstruction.sqlite3"
+    record = _record("public-dataclass-reconstruction")
+    original_digest = digest_bytes(b"reconstruction-original")
+    mutated_digest = digest_bytes(b"reconstruction-mutated")
+    event = _event(
+        record.record_id,
+        {"items": [{"digest": original_digest}]},
+    )
+    reconstructions = (
+        copy.copy(event),
+        copy.deepcopy(event),
+        pickle.loads(pickle.dumps(event)),
+    )
+
+    for reconstructed in reconstructions:
+        assert reconstructed is not event
+        assert reconstructed == event
+        assert asdict(reconstructed) == asdict(event)
+        first_read = reconstructed.details
+        second_read = reconstructed.details
+        first_read["items"][0]["digest"] = mutated_digest  # type: ignore[index]
+        assert first_read is not second_read
+        assert first_read["items"] is not second_read["items"]
+        assert reconstructed.details == {
+            "items": [{"digest": original_digest}]
+        }
+        assert event.details == {"items": [{"digest": original_digest}]}
+
+    with _open_store(path) as store:
+        receipt = store.commit(
+            records=(record,),
+            event=event,
+            head_name="checkpoint",
+            expected_head=None,
+            new_head_id=record.record_id,
+        )
+        for reconstructed in reconstructions:
+            retry = store.commit(
+                records=(record,),
+                event=reconstructed,
+                head_name="checkpoint",
+                expected_head=None,
+                new_head_id=record.record_id,
+            )
+            assert retry == receipt
+        assert store.read_audit_head() is not None
+        assert store.read_audit_head().audit_sequence == 1  # type: ignore[union-attr]
 
 
 def test_public_dataclass_copies_cannot_change_persisted_exact_retry(

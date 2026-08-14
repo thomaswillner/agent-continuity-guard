@@ -212,6 +212,27 @@ class AuditEventDraft:
 
         return value
 
+    def __copy__(self) -> AuditEventDraft:
+        return type(self)(self.kind, self.subject_id, self.logical_time, self.details)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> AuditEventDraft:
+        copied = type(self)(
+            self.kind,
+            self.subject_id,
+            self.logical_time,
+            self.details,
+        )
+        memo[id(self)] = copied
+        return copied
+
+    def __reduce__(
+        self,
+    ) -> tuple[type[AuditEventDraft], tuple[str, RecordId, LogicalTime, JsonObject]]:
+        return (
+            type(self),
+            (self.kind, self.subject_id, self.logical_time, self.details),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SensitiveLocalValueDraft:
