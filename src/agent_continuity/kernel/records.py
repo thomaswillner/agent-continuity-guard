@@ -40,6 +40,7 @@ SCHEMA_REGISTRY: dict[str, str] = {
     "Checkpoint/v1": "checkpoint.schema.json",
     "CheckpointReceipt/v1": "checkpoint-receipt.schema.json",
     "Criterion/v1": "criterion.schema.json",
+    "Error/v1": "error.schema.json",
     "EvaluationResult/v1": "evaluation-result.schema.json",
     "Fact/v1": "fact.schema.json",
     "Finding/v1": "finding.schema.json",

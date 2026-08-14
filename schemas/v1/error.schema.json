@@ -1,0 +1,31 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/error.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "category": {
+      "enum": ["integrity", "internal", "request", "transition"],
+      "type": "string"
+    },
+    "code": {
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "type": "string"
+    },
+    "message_id": {
+      "maxLength": 192,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "type": "string"
+    },
+    "parameters": {
+      "additionalProperties": false,
+      "maxProperties": 0,
+      "type": "object"
+    },
+    "schema": {"const": "Error/v1"}
+  },
+  "required": ["category", "code", "message_id", "parameters", "schema"],
+  "title": "Error/v1",
+  "type": "object",
+  "x-record-type": "Error/v1"
+}

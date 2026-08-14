@@ -43,6 +43,7 @@ from agent_continuity.kernel.records import (
     build_ruleset,
     criterion_payload,
 )
+from agent_continuity.output import ErrorRecord, error_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_ROOT = ROOT / "schemas" / "v1"
@@ -231,6 +232,14 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
             )
             if verification_result_payload(result) != instance:
                 raise SchemaVerificationError("invalid_instance")
+        elif name == "error.schema.json":
+            error = ErrorRecord(
+                category=instance["category"],
+                code=instance["code"],
+                message_id=instance["message_id"],
+            )
+            if error_payload(error) != instance:
+                raise SchemaVerificationError("invalid_instance")
     except (CanonicalJSONError, KeyError, TypeError, ValueError) as error:
         raise SchemaVerificationError("invalid_instance") from error
 
@@ -362,6 +371,13 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "unresolved": [],
         },
         "criterion.schema.json": {"digest": digest, "ordinal": 0},
+        "error.schema.json": {
+            "category": "request",
+            "code": "request_invalid",
+            "message_id": "acg.request.invalid",
+            "parameters": {},
+            "schema": "Error/v1",
+        },
         "evaluation-result.schema.json": {
             "findings": [],
             "schema": "EvaluationResult/v1",
