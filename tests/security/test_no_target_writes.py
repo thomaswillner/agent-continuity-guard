@@ -49,6 +49,13 @@ def _payload(result: subprocess.CompletedProcess[bytes]) -> dict[str, object]:
     return parsed
 
 
+def _error_payload(result: subprocess.CompletedProcess[bytes]) -> dict[str, object]:
+    parsed = json.loads(result.stdout)
+    assert type(parsed) is dict
+    assert canonical_bytes(parsed) == result.stdout
+    return parsed
+
+
 def _metadata(path: Path) -> Metadata:
     entry = path.lstat()
     attributes: list[bytes] = []
@@ -108,6 +115,55 @@ def _arguments(target: Path, state_home: Path) -> tuple[str, ...]:
         "--session-key",
         "no-target-writes",
     )
+
+
+@pytest.mark.parametrize(
+    "state_relative_path",
+    [
+        Path("."),
+        Path("must-not-create-state"),
+        Path(".git"),
+        Path(".git") / "must-not-create-state",
+    ],
+    ids=("target-root", "target-child", "git-directory", "git-directory-child"),
+)
+def test_public_cli_init_refuses_overlapping_state_before_sqlite_creation(
+    tmp_path: Path,
+    state_relative_path: Path,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    state_home = repo.root / state_relative_path
+    before = (
+        repository_write_manifest(repo.root),
+        repository_git_observation(repo),
+        _application_metadata(repo.root),
+    )
+    assert tuple(repo.root.rglob("*.sqlite3")) == ()
+
+    refused = _command(
+        "init",
+        *_arguments(repo.root, state_home),
+        "--goal",
+        "overlap refusal goal",
+        "--instruction",
+        "AGENTS.md",
+    )
+
+    assert refused.returncode == 2
+    assert refused.stderr == b""
+    assert _error_payload(refused) == {
+        "schema": "Error/v1",
+        "category": "request",
+        "code": "request_invalid",
+        "message_id": "acg.request.invalid",
+        "parameters": {},
+    }
+    assert tuple(repo.root.rglob("*.sqlite3")) == ()
+    assert (
+        repository_write_manifest(repo.root),
+        repository_git_observation(repo),
+        _application_metadata(repo.root),
+    ) == before
 
 
 def test_public_cli_commands_preserve_target_and_keep_raw_inputs_external(
