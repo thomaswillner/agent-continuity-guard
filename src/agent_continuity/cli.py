@@ -157,6 +157,11 @@ def _safe_close(descriptor: int) -> None:
             os.close(descriptor)
 
 
+def _checked_close(descriptor: int) -> None:
+    if descriptor >= 0:
+        os.close(descriptor)
+
+
 def _open_pinned_directory(path: Path) -> int:
     if not path.is_absolute() or any(part in {".", ".."} for part in path.parts):
         raise CLIRequestError("anchor directory is invalid")
@@ -218,6 +223,14 @@ def _cleanup_anchor_output(parent_fd: int, name: str) -> None:
     _fsync_directory(parent_fd)
 
 
+def _assert_parent_external(
+    parent_fd: int,
+    protected: frozenset[tuple[int, int]],
+) -> None:
+    if _ancestor_identities(parent_fd) & protected:
+        raise CLIRequestError("anchor output overlaps protected state")
+
+
 def _safe_anchor_output(
     output: str,
     *,
@@ -246,8 +259,7 @@ def _safe_anchor_output(
         ]
         protected = frozenset(_directory_identity(item) for item in protected_fds)
         parent_fd = _open_pinned_directory(parent)
-        if _ancestor_identities(parent_fd) & protected:
-            raise CLIRequestError("anchor output overlaps protected state")
+        _assert_parent_external(parent_fd, protected)
         assert_external_state(target, git_directory, state_home)
         flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_CLOEXEC", 0)
         no_follow = getattr(os, "O_NOFOLLOW", None)
@@ -255,6 +267,7 @@ def _safe_anchor_output(
             raise CLIRequestError("safe anchor output is unsupported")
         output_fd = os.open(candidate.name, flags | no_follow, 0o600, dir_fd=parent_fd)
         created = True
+        _assert_parent_external(parent_fd, protected)
         metadata = os.fstat(output_fd)
         if not stat.S_ISREG(metadata.st_mode):
             raise CLIRequestError("anchor output is invalid")
@@ -266,9 +279,11 @@ def _safe_anchor_output(
                 raise OSError("anchor output write did not advance")
             offset += written
         os.fsync(output_fd)
-        _safe_close(output_fd)
+        _assert_parent_external(parent_fd, protected)
+        _checked_close(output_fd)
         output_fd = -1
         _fsync_directory(parent_fd)
+        _assert_parent_external(parent_fd, protected)
     except (CLIRequestError, OSError, RuntimeError, StatePathError) as error:
         failure: BaseException = error
         if created:

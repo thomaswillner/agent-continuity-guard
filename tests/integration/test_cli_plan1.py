@@ -348,3 +348,105 @@ def test_invalid_label_and_different_reinitialize_are_request_errors(
     assert conflicting.returncode == 2
     assert conflicting.stderr == b""
     assert _payload(conflicting)["category"] == "request"
+
+
+def test_anchor_export_revalidates_pinned_parent_after_reparent_into_target(
+    tmp_path: Path,
+) -> None:
+    target, _state_home, common = _initialize_cli_state(tmp_path)
+    parent = tmp_path / "reparent-parent"
+    moved = target / "moved-parent"
+    parent.mkdir()
+    injection = _injection_directory(
+        tmp_path,
+        """
+import os
+from pathlib import Path
+
+parent = Path(os.environ["ACG_TEST_REPARENT_PARENT"])
+target = Path(os.environ["ACG_TEST_REPARENT_TARGET"])
+real_open = os.open
+fired = False
+
+def guarded_open(path, flags, mode=0o777, *, dir_fd=None):
+    global fired
+    if not fired and os.fspath(path) == "anchor.json" and dir_fd is not None:
+        fired = True
+        os.rename(parent, target / "moved-parent")
+    return real_open(path, flags, mode, dir_fd=dir_fd)
+
+os.open = guarded_open
+""",
+    )
+    result = _command(
+        "audit-anchor",
+        "export",
+        *common,
+        "--output",
+        os.fspath(parent / "anchor.json"),
+        injection=injection,
+        extra_environment={
+            "ACG_TEST_REPARENT_PARENT": os.fspath(parent),
+            "ACG_TEST_REPARENT_TARGET": os.fspath(target),
+        },
+    )
+    assert result.returncode == 2
+    assert result.stderr == b""
+    assert _payload(result)["schema"] == "Error/v1"
+    assert moved.is_dir()
+    assert not (moved / "anchor.json").exists()
+
+
+def test_anchor_export_fails_and_cleans_when_success_close_reports_eio(
+    tmp_path: Path,
+) -> None:
+    _target, _state_home, common = _initialize_cli_state(tmp_path)
+    output = tmp_path / "anchor.json"
+    injection = _injection_directory(
+        tmp_path,
+        """
+import errno
+import os
+
+real_open = os.open
+real_close = os.close
+output_fd = -1
+fired = False
+
+def guarded_open(path, flags, mode=0o777, *, dir_fd=None):
+    global output_fd
+    descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+    if os.fspath(path) == "anchor.json" and flags & os.O_CREAT:
+        output_fd = descriptor
+    return descriptor
+
+def guarded_close(descriptor):
+    global fired
+    if descriptor == output_fd and not fired:
+        fired = True
+        raise OSError(errno.EIO, "injected output close failure")
+    return real_close(descriptor)
+
+os.open = guarded_open
+os.close = guarded_close
+""",
+    )
+    failed = _command(
+        "audit-anchor",
+        "export",
+        *common,
+        "--output",
+        os.fspath(output),
+        injection=injection,
+    )
+    assert failed.returncode == 2
+    assert failed.stderr == b""
+    assert _payload(failed)["schema"] == "Error/v1"
+    assert not output.exists()
+
+    retried = _command(
+        "audit-anchor", "export", *common, "--output", os.fspath(output)
+    )
+    assert retried.returncode == 0
+    assert retried.stderr == b""
+    assert _payload(retried)["audit_sequence"] >= 1
