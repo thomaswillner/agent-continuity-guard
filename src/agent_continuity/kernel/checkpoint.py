@@ -2,29 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from typing import cast
-
-from agent_continuity.capture.base import (
-    CaptureSnapshot,
-    InstructionFileV1,
-    instruction_manifest_payload,
-)
-from agent_continuity.capture.coordinator import snapshot_findings
 
 from .canonical import CanonicalJSONError, canonical_bytes, canonical_loads
 from .evaluation import (
-    EvaluationCase,
     EvaluationResult,
-    Profile,
-    Verdict,
-    evaluate,
     evaluation_result_payload,
 )
-from .findings import Finding
 from .model import (
     AssignmentAuthority,
     Digest,
     JsonObject,
+    JsonValue,
     LogicalTime,
     RecordId,
     StoredRecord,
@@ -34,6 +24,7 @@ from .paths import (
     PathScopeKind,
     PathScopeV1,
     parse_path_encoding,
+    path_identity_payload,
 )
 from .records import (
     CheckpointV1,
@@ -42,7 +33,10 @@ from .records import (
     WorkItemV1,
     build_checkpoint,
     make_record,
+    require_digest,
 )
+
+_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 _CHECKPOINT_FIELDS = frozenset(
     {
@@ -287,34 +281,37 @@ def instruction_paths_from_record(record: StoredRecord) -> tuple[bytes, ...]:
     values = payload["files"]
     if type(values) is not list:
         raise CanonicalJSONError("instruction files are invalid")
-    files = tuple(
-        InstructionFileV1(
-            path=_path_identity(item["path"]),
-            blob_oid=_string(item["blob_oid"], label="instruction blob ID"),
-            byte_digest=Digest(
-                _string(item["byte_digest"], label="instruction byte digest")
-            ),
+    files: list[JsonValue] = []
+    paths: list[bytes] = []
+    for value in values:
+        item = _object(
+            value,
+            frozenset({"blob_oid", "byte_digest", "path"}),
+            label="instruction file",
         )
-        for item in (
-            _object(
-                value,
-                frozenset({"blob_oid", "byte_digest", "path"}),
-                label="instruction file",
-            )
-            for value in values
+        path = _path_identity(item["path"])
+        if path.encoding != "git-path-bytes":
+            raise CanonicalJSONError("instruction path domain is invalid")
+        blob_oid = _string(item["blob_oid"], label="instruction blob ID")
+        if _OID_RE.fullmatch(blob_oid) is None:
+            raise CanonicalJSONError("instruction blob ID is invalid")
+        byte_digest = _string(
+            item["byte_digest"], label="instruction byte digest"
         )
-    )
-    if any(item.path.encoding != "git-path-bytes" for item in files):
-        raise CanonicalJSONError("instruction path domain is invalid")
-    if (
-        make_record("InstructionManifest", instruction_manifest_payload(files))
-        != record
-    ):
+        require_digest(byte_digest)
+        files.append(
+            {
+                "blob_oid": blob_oid,
+                "byte_digest": byte_digest,
+                "path": path_identity_payload(path),
+            }
+        )
+        paths.append(path.raw_bytes())
+    if make_record("InstructionManifest", {"files": files}) != record:
         raise CanonicalJSONError("instruction record identity is invalid")
-    paths = tuple(item.path.raw_bytes() for item in files)
     if len(paths) != len(set(paths)):
         raise CanonicalJSONError("instruction paths are not unique")
-    return paths
+    return tuple(paths)
 
 
 def build_subsequent_checkpoint(
@@ -349,40 +346,6 @@ def build_subsequent_checkpoint(
         initialization_intent_id=parent.initialization_intent_id,
         created_at=created_at,
     )
-
-
-def evaluate_checkpoint_capture(
-    checkpoint: CheckpointV1,
-    snapshot_a: CaptureSnapshot,
-    snapshot_b: CaptureSnapshot,
-    profile: Profile,
-    *,
-    policy_id: RecordId,
-    ruleset_id: RecordId,
-) -> EvaluationResult:
-    """Evaluate capture stability, cleanliness, and checkpoint identity binding."""
-
-    case = snapshot_findings(snapshot_a, snapshot_b, profile)
-    findings = list(case.findings)
-    identity_matches = (
-        snapshot_a.target.record().record_id == checkpoint.target_id
-        and snapshot_a.instruction_record().record_id == checkpoint.instruction_id
-        and policy_id == checkpoint.policy_id
-        and ruleset_id == checkpoint.ruleset_id
-    )
-    if not identity_matches and not any(
-        finding.code == "capture.unstable" for finding in findings
-    ):
-        findings.append(
-            Finding(
-                code="capture.unstable",
-                verdict=Verdict.UNKNOWN,
-                subject_id=checkpoint.checkpoint_id,
-                message_id="acg.capture.unstable",
-                parameters={},
-            )
-        )
-    return evaluate(EvaluationCase(profile=profile, findings=tuple(findings)))
 
 
 def verification_result_payload(result: EvaluationResult) -> JsonObject:

@@ -99,6 +99,35 @@ def _process_checkpoint(
         adapter.close()
 
 
+def _process_identical_checkpoint(
+    target: str,
+    state_home: str,
+    barrier: Any,
+    results: Any,
+) -> None:
+    adapter = ProcessBarrierAdapter(target, barrier)
+    try:
+        receipt = Continuity.open(
+            target,
+            state_home=state_home,
+            session_key="identical-process-race",
+            clock=FixedClock("2026-08-14T12:00:01Z"),
+            target_adapter=adapter,
+        ).checkpoint()
+        results.put(
+            (
+                "receipt",
+                receipt.checkpoint_id,
+                receipt.audit_event_id,
+                receipt.audit_sequence,
+            )
+        )
+    except Exception as error:
+        results.put(("error", type(error).__name__, str(error)))
+    finally:
+        adapter.close()
+
+
 def _process_initialize_winner(
     target: str,
     state_home: str,
@@ -235,7 +264,11 @@ def test_checkpoint_appends_one_parent_linked_checkpoint_and_reason_digest(
     assert child_audit["kind"] == "checkpoint"
     assert child_audit["subject_id"] == receipt.checkpoint_id
     assert child_audit["previous_event_id"] == initial.audit_event_id
-    assert child_audit["details"] == {"digest": digest_bytes(reason.encode())}
+    assert child_audit["details"]["digest"] == digest_bytes(reason.encode())
+    invocation_digests = child_audit["details"]["digests"]
+    assert len(invocation_digests) == 1
+    assert invocation_digests[0].startswith("sha256:")
+    assert len(invocation_digests[0]) == 71
     assert reason.encode() not in database.read_bytes()
 
 
@@ -323,6 +356,58 @@ def test_two_cross_process_checkpoint_writers_retry_from_fresh_parent(
     assert by_id[sequence_to_id[3]]["audit_parent_id"] == sequence_to_audit_id[2]
     assert repository_write_manifest(target) == before_target
     assert b"concurrent reason bytes" not in _database(state_home).read_bytes()
+
+
+def test_identical_cross_process_checkpoint_calls_append_distinct_children(
+    tmp_path: Path,
+) -> None:
+    target, snapshot = _snapshot(tmp_path)
+    state_home = tmp_path / "state"
+    initial = _continuity(
+        target,
+        state_home,
+        (snapshot,) * 3,
+        session_key="identical-process-race",
+    ).initialize("goal", (), instruction_paths=("AGENTS.md",))
+    before_target = repository_write_manifest(target)
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(2)
+    results = context.Queue()
+    processes = tuple(
+        context.Process(
+            target=_process_identical_checkpoint,
+            args=(os.fspath(target), os.fspath(state_home), barrier, results),
+        )
+        for _index in range(2)
+    )
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=45)
+        assert process.exitcode == 0
+    observed = tuple(sorted(results.get(timeout=5) for _process in processes))
+
+    assert tuple(item[0] for item in observed) == ("receipt", "receipt")
+    assert {item[3] for item in observed} == {2, 3}
+    sequence_to_checkpoint = {item[3]: item[1] for item in observed}
+    sequence_to_audit = {item[3]: item[2] for item in observed}
+    rows = _checkpoint_rows(_database(state_home))
+    assert len(rows) == 3
+    by_id = {identity: payload for identity, payload in rows}
+    assert (
+        by_id[sequence_to_checkpoint[2]]["parent_checkpoint_id"]
+        == initial.checkpoint_id
+    )
+    assert (
+        by_id[sequence_to_checkpoint[3]]["parent_checkpoint_id"]
+        == sequence_to_checkpoint[2]
+    )
+    assert (
+        by_id[sequence_to_checkpoint[3]]["audit_parent_id"]
+        == sequence_to_audit[2]
+    )
+    assert repository_write_manifest(target) == before_target
 
 
 def test_checkpoint_refusal_never_exposes_reason_or_target_path(tmp_path: Path) -> None:

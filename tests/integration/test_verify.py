@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -304,3 +307,151 @@ def test_verify_reports_compiled_policy_drift_without_store_write(
     assert result.verdict.value == "unknown"
     assert result.transition_allowed is False
     assert _projection(database) == before
+
+
+def test_kernel_checkpoint_standard_import_loads_no_io_capable_modules() -> None:
+    source_root = Path(__file__).parents[2] / "src"
+    forbidden = (
+        "agent_continuity.api",
+        "agent_continuity.adapters",
+        "agent_continuity.capture",
+        "agent_continuity.store",
+        "ftplib",
+        "glob",
+        "http",
+        "pathlib",
+        "shutil",
+        "socket",
+        "sqlite3",
+        "ssl",
+        "subprocess",
+        "tempfile",
+        "urllib",
+    )
+    script = (
+        "import sys\n"
+        f"sys.path.insert(0, {os.fspath(source_root)!r})\n"
+        "import agent_continuity.kernel.checkpoint\n"
+        f"forbidden = {forbidden!r}\n"
+        "loaded = sorted(name for name in sys.modules "
+        "if any(name == item or name.startswith(item + '.') "
+        "for item in forbidden))\n"
+        "print('\\n'.join(loaded))\n"
+        "raise SystemExit(bool(loaded))\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert result.stderr == ""
+    assert result.stdout == "\n"
+
+    baseline = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            (
+                "import sys, typing, dataclasses\n"
+                "print('\\n'.join(name for name in ('os', 'os.path') "
+                "if name in sys.modules))\n"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert baseline.returncode == 0
+    assert baseline.stderr == ""
+    assert baseline.stdout == "os\nos.path\n"
+
+
+def test_kernel_source_import_graph_has_no_io_capability_edges() -> None:
+    kernel_root = Path(__file__).parents[2] / "src" / "agent_continuity" / "kernel"
+    forbidden = (
+        "agent_continuity.adapters",
+        "agent_continuity.capture",
+        "agent_continuity.store",
+        "ftplib",
+        "glob",
+        "http",
+        "importlib",
+        "os",
+        "pathlib",
+        "random",
+        "secrets",
+        "shutil",
+        "socket",
+        "sqlite3",
+        "ssl",
+        "subprocess",
+        "tempfile",
+        "time",
+        "urllib",
+    )
+    violations: list[str] = []
+    for path in sorted(kernel_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=os.fspath(path))
+        for node in ast.walk(tree):
+            imported: tuple[str, ...] = ()
+            if isinstance(node, ast.Import):
+                imported = tuple(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                imported = () if node.module is None else (node.module,)
+            for name in imported:
+                if any(
+                    name == item or name.startswith(item + ".")
+                    for item in forbidden
+                ):
+                    violations.append(f"{path.name}:{node.lineno}:{name}")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"__import__", "eval", "exec", "open"}
+            ):
+                violations.append(f"{path.name}:{node.lineno}:{node.func.id}()")
+
+    assert violations == []
+
+
+def test_lazy_root_exports_preserve_public_identity_and_behavior() -> None:
+    import agent_continuity
+    from agent_continuity.api import (
+        AlreadyInitialized as ApiAlreadyInitialized,
+    )
+    from agent_continuity.api import CheckpointReceipt as ApiCheckpointReceipt
+    from agent_continuity.api import Continuity as ApiContinuity
+    from agent_continuity.api import ContinuityError as ApiContinuityError
+    from agent_continuity.api import (
+        ContinuityRequestError as ApiContinuityRequestError,
+    )
+    from agent_continuity.api import TransitionRefused as ApiTransitionRefused
+    from agent_continuity.kernel.evaluation import Profile as KernelProfile
+    from agent_continuity.kernel.model import PromotionMode as KernelPromotionMode
+
+    assert agent_continuity.__version__ == "0.1.0.dev0"
+    assert agent_continuity.__all__ == [
+        "AlreadyInitialized",
+        "CheckpointReceipt",
+        "Continuity",
+        "ContinuityError",
+        "ContinuityRequestError",
+        "Profile",
+        "PromotionMode",
+        "TransitionRefused",
+    ]
+    assert agent_continuity.AlreadyInitialized is ApiAlreadyInitialized
+    assert agent_continuity.CheckpointReceipt is ApiCheckpointReceipt
+    assert agent_continuity.Continuity is ApiContinuity
+    assert agent_continuity.ContinuityError is ApiContinuityError
+    assert agent_continuity.ContinuityRequestError is ApiContinuityRequestError
+    assert agent_continuity.TransitionRefused is ApiTransitionRefused
+    assert agent_continuity.Profile is KernelProfile
+    assert agent_continuity.PromotionMode is KernelPromotionMode

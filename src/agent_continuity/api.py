@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -13,7 +14,10 @@ from typing import Final, cast
 
 from agent_continuity.adapters import Clock, SystemClock
 from agent_continuity.capture import CaptureSnapshot, GitTargetAdapter, TargetAdapter
-from agent_continuity.capture.coordinator import snapshot_findings
+from agent_continuity.capture.coordinator import (
+    evaluate_checkpoint_capture,
+    snapshot_findings,
+)
 from agent_continuity.kernel.canonical import (
     CanonicalJSONError,
     canonical_bytes,
@@ -23,7 +27,6 @@ from agent_continuity.kernel.canonical import (
 from agent_continuity.kernel.checkpoint import (
     build_subsequent_checkpoint,
     checkpoint_from_record,
-    evaluate_checkpoint_capture,
     instruction_paths_from_record,
 )
 from agent_continuity.kernel.evaluation import (
@@ -667,6 +670,7 @@ class Continuity:
         if reason is not None and type(reason) is not str:
             raise TypeError("checkpoint reason must be text or null")
         reason_digest = None if reason is None else digest_bytes(reason.encode("utf-8"))
+        invocation_digest = digest_bytes(secrets.token_bytes(32))
         policy = self._loaded_policy.compiled
         ruleset_id = build_ruleset(()).ruleset_id
         for attempt in range(_CHECKPOINT_ATTEMPTS):
@@ -725,7 +729,14 @@ class Continuity:
                     kind="checkpoint",
                     subject_id=child.checkpoint_id,
                     logical_time=child.created_at,
-                    details={} if reason_digest is None else {"digest": reason_digest},
+                    details={
+                        "digests": [invocation_digest],
+                        **(
+                            {}
+                            if reason_digest is None
+                            else {"digest": reason_digest}
+                        ),
+                    },
                 )
                 try:
                     committed = store.commit(
