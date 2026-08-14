@@ -59,11 +59,17 @@ def test_authoring_and_compiled_changes_bind_policy_identity(tmp_path: Path) -> 
     [
         'promotion_mode = "review"',
         "[limits]\nmax_paths = 249999",
+        "[limits]\nmax_file_bytes = 1073741823",
+        "[limits]\nmax_aggregate_bytes = 21474836479",
+        "[limits]\nmax_analyzer_text_bytes = 4194303",
+        "[limits]\nmax_external_json_bytes = 8388607",
         'enabled_detectors = ["target.dirty"]\n'
         'severity_by_code = {"target.dirty" = "block"}',
         'severity_by_code = {"capture.unstable" = "warn", "target.dirty" = "block"}',
         'required_adapter_capabilities = ["atomic_snapshot"]',
         'max_assignment_authority = "scoped_write"',
+        'approval_operator_ids = ["sha256:' + "a" * 64 + '"]',
+        'rollback_operator_ids = ["sha256:' + "b" * 64 + '"]',
         "evidence_expiry_seconds = 3599",
     ],
 )

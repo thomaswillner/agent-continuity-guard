@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import tomllib
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -17,6 +18,9 @@ from agent_continuity.kernel.canonical import (
 )
 from agent_continuity.kernel.evaluation import Profile, Verdict
 from agent_continuity.kernel.model import (
+    ADAPTER_CAPABILITY_VOCABULARY_V1,
+    DETECTOR_CODE_VOCABULARY_V1,
+    RESOURCE_LIMIT_MAXIMA_V1,
     AssignmentAuthority,
     Digest,
     JsonObject,
@@ -31,23 +35,9 @@ from agent_continuity.kernel.records import (
 )
 
 _MAX_POLICY_BYTES: Final = 8 * 1024 * 1024
-_CAPABILITIES: Final = frozenset(
-    {
-        "atomic_snapshot",
-        "descriptor_pinned_reads",
-        "git_immutable_objects",
-        "git_network_disabled",
-        "windows_reparse_protection",
-    }
-)
-_DETECTORS: Final = frozenset({"capture.unstable", "target.dirty"})
-_LIMIT_MAXIMA: Final = {
-    "max_paths": 250_000,
-    "max_file_bytes": 1_073_741_824,
-    "max_aggregate_bytes": 21_474_836_480,
-    "max_analyzer_text_bytes": 4_194_304,
-    "max_external_json_bytes": 8_388_608,
-}
+_MAX_POLICY_PATH_BYTES: Final = 32 * 1024
+_MAX_POLICY_PATH_COMPONENT_BYTES: Final = 255
+_LIMIT_MAXIMA: Final = dict(RESOURCE_LIMIT_MAXIMA_V1)
 _TOP_LEVEL_KEYS: Final = frozenset(
     {
         "version",
@@ -93,6 +83,8 @@ class PolicyError(RuntimeError):
 class PolicyRequestError(PolicyError):
     """Policy request or authoring is invalid."""
 
+    exit_code: Final = 2
+
 
 @dataclass(frozen=True, slots=True)
 class LoadedPolicy:
@@ -101,24 +93,43 @@ class LoadedPolicy:
     source_digest: Digest
 
 
-def _validated_absolute(path: Path, *, target: bool) -> Path:
+def _absolute_components(path: Path, *, allow_root: bool) -> tuple[str, ...]:
     if not isinstance(path, Path):
         raise PolicyRequestError("policy path is invalid")
     raw = str(path)
-    try:
-        raw.encode("utf-8", errors="strict")
-    except UnicodeEncodeError as error:
-        raise PolicyRequestError("policy path is invalid") from error
-    if not path.is_absolute() or not raw or any(ord(item) < 0x20 for item in raw):
+    encoded: bytes | None = None
+    with suppress(UnicodeEncodeError):
+        encoded = raw.encode("utf-8", errors="strict")
+    if (
+        encoded is None
+        or len(encoded) > _MAX_POLICY_PATH_BYTES
+        or not path.is_absolute()
+        or path.anchor != os.sep
+        or not raw
+        or any(item < 0x20 for item in encoded)
+    ):
         raise PolicyRequestError("policy path is invalid")
-    if target:
+    components = path.parts[1:]
+    if (not allow_root and not components) or any(
+        component in {"", ".", ".."} for component in components
+    ):
+        raise PolicyRequestError("policy path is invalid")
+    component_bytes: list[bytes] = []
+    for component in components:
         try:
-            metadata = path.stat()
-        except OSError as error:
-            raise PolicyRequestError("target policy root is unavailable") from error
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise PolicyRequestError("target policy root is unavailable")
-    return path
+            value = component.encode("utf-8", errors="strict")
+        except UnicodeEncodeError:
+            value = b""
+        component_bytes.append(value)
+    if any(
+        not value or len(value) > _MAX_POLICY_PATH_COMPONENT_BYTES
+        for value in component_bytes
+    ):
+        raise PolicyRequestError("policy path is invalid")
+    canonical = os.sep + os.sep.join(components) if components else os.sep
+    if raw != canonical:
+        raise PolicyRequestError("policy path is noncanonical")
+    return components
 
 
 def _file_flags() -> int:
@@ -128,26 +139,102 @@ def _file_flags() -> int:
     return flags
 
 
-def _read_fd(descriptor: int) -> bytes:
+def _directory_flags() -> int:
+    flags = _file_flags()
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    return flags
+
+
+def _safe_close(descriptor: int) -> None:
+    with suppress(OSError):
+        os.close(descriptor)
+
+
+def _open_directory_component(parent_fd: int, component: str) -> int:
+    descriptor: int | None = None
+    with suppress(OSError):
+        descriptor = os.open(
+            component,
+            _directory_flags(),
+            dir_fd=parent_fd,
+        )
+    if descriptor is None:
+        raise PolicyRequestError("policy path component is unavailable")
+    metadata: os.stat_result | None = None
+    with suppress(OSError):
+        metadata = os.fstat(descriptor)
+    if metadata is None or not stat.S_ISDIR(metadata.st_mode):
+        _safe_close(descriptor)
+        raise PolicyRequestError("policy path component is invalid")
+    return descriptor
+
+
+def _walk_absolute_directories(components: tuple[str, ...]) -> int:
+    descriptor: int | None = None
+    with suppress(OSError):
+        descriptor = os.open(os.sep, _directory_flags())
+    if descriptor is None:
+        raise PolicyRequestError("policy root descriptor is unavailable")
+    for component in components:
+        try:
+            next_descriptor = _open_directory_component(descriptor, component)
+        except PolicyRequestError:
+            _safe_close(descriptor)
+            raise
+        _safe_close(descriptor)
+        descriptor = next_descriptor
+    return descriptor
+
+
+def _open_absolute_file(components: tuple[str, ...]) -> int:
+    parent_fd = _walk_absolute_directories(components[:-1])
+    descriptor: int | None = None
     try:
+        with suppress(OSError):
+            descriptor = os.open(
+                components[-1],
+                _file_flags(),
+                dir_fd=parent_fd,
+            )
+    finally:
+        _safe_close(parent_fd)
+    if descriptor is None:
+        raise PolicyRequestError("explicit policy source is unavailable")
+    return descriptor
+
+
+def _read_fd(descriptor: int) -> bytes:
+    before: os.stat_result | None = None
+    with suppress(OSError):
         before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode):
-            raise PolicyRequestError("policy source is not a regular file")
-        chunks: list[bytes] = []
-        total = 0
-        while True:
+    if before is None:
+        raise PolicyRequestError("policy source could not be observed")
+    if not stat.S_ISREG(before.st_mode):
+        raise PolicyRequestError("policy source is not a regular file")
+    chunks: list[bytes] = []
+    total = 0
+    read_failed = False
+    while True:
+        chunk: bytes | None = None
+        try:
             chunk = os.read(descriptor, min(1024 * 1024, _MAX_POLICY_BYTES + 1 - total))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            total += len(chunk)
-            if total > _MAX_POLICY_BYTES:
-                raise PolicyRequestError("policy source exceeded byte limit")
+        except OSError:
+            read_failed = True
+        if read_failed:
+            break
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > _MAX_POLICY_BYTES:
+            raise PolicyRequestError("policy source exceeded byte limit")
+    if read_failed:
+        raise PolicyRequestError("policy source could not be read")
+    after: os.stat_result | None = None
+    with suppress(OSError):
         after = os.fstat(descriptor)
-    except PolicyRequestError:
-        raise
-    except OSError as error:
-        raise PolicyRequestError("policy source could not be read") from error
+    if after is None:
+        raise PolicyRequestError("policy source could not be observed")
     identity_before = (
         before.st_dev,
         before.st_ino,
@@ -169,38 +256,35 @@ def _read_fd(descriptor: int) -> bytes:
     return b"".join(chunks)
 
 
-def _read_explicit(path: Path) -> bytes:
-    try:
-        descriptor = os.open(path, _file_flags())
-    except OSError as error:
-        raise PolicyRequestError("explicit policy source is unavailable") from error
+def _read_explicit(components: tuple[str, ...]) -> bytes:
+    descriptor = _open_absolute_file(components)
     try:
         return _read_fd(descriptor)
     finally:
-        os.close(descriptor)
+        _safe_close(descriptor)
 
 
-def _read_target(target: Path) -> bytes | None:
-    directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-    directory_flags |= getattr(os, "O_DIRECTORY", 0)
-    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
-    try:
-        root_fd = os.open(target, directory_flags)
-    except OSError as error:
-        raise PolicyRequestError("target policy root is unavailable") from error
+def _read_target(components: tuple[str, ...]) -> bytes | None:
+    root_fd = _walk_absolute_directories(components)
+    descriptor: int | None = None
+    missing = False
     try:
         try:
             descriptor = os.open("acg.toml", _file_flags(), dir_fd=root_fd)
         except FileNotFoundError:
-            return None
-        except OSError as error:
-            raise PolicyRequestError("target policy source is unavailable") from error
-        try:
-            return _read_fd(descriptor)
-        finally:
-            os.close(descriptor)
+            missing = True
+        except OSError:
+            pass
     finally:
-        os.close(root_fd)
+        _safe_close(root_fd)
+    if missing:
+        return None
+    if descriptor is None:
+        raise PolicyRequestError("target policy source is unavailable")
+    try:
+        return _read_fd(descriptor)
+    finally:
+        _safe_close(descriptor)
 
 
 def _exact_string(value: object, *, field: str) -> str:
@@ -216,10 +300,12 @@ def _enum(
     field: str,
 ) -> _EnumT:
     text = _exact_string(value, field=field)
-    try:
-        return enum_type(text)
-    except ValueError as error:
-        raise PolicyRequestError(f"{field} is unsupported") from error
+    converted: _EnumT | None = None
+    with suppress(ValueError):
+        converted = enum_type(text)
+    if converted is None:
+        raise PolicyRequestError(f"{field} is unsupported")
+    return converted
 
 
 def _string_tuple(
@@ -243,13 +329,14 @@ def _string_tuple(
 
 def _operator_ids(value: object, *, field: str) -> tuple[RecordId, ...]:
     values = _string_tuple(value, field=field, max_items=1024)
+    valid = True
     try:
         for item in values:
             require_digest(item)
-    except CanonicalJSONError as error:
-        raise PolicyRequestError(
-            f"{field} contains invalid record identifiers"
-        ) from error
+    except CanonicalJSONError:
+        valid = False
+    if not valid:
+        raise PolicyRequestError(f"{field} contains invalid record identifiers")
     return tuple(RecordId(item) for item in values)
 
 
@@ -283,15 +370,16 @@ def _limits(value: object) -> ResourceLimitsV1:
 def _severity(value: object) -> tuple[tuple[str, Verdict], ...]:
     if type(value) is not dict or any(type(key) is not str for key in value):
         raise PolicyRequestError("severity_by_code has invalid type")
-    if any(key not in _DETECTORS for key in value):
+    if any(key not in DETECTOR_CODE_VOCABULARY_V1 for key in value):
         raise PolicyRequestError("severity_by_code contains unsupported identifiers")
     result: list[tuple[str, Verdict]] = []
     for key, raw in value.items():
         text = _exact_string(raw, field="severity_by_code")
-        try:
+        verdict: Verdict | None = None
+        with suppress(ValueError):
             verdict = Verdict(text)
-        except ValueError as error:
-            raise PolicyRequestError("severity_by_code is unsupported") from error
+        if verdict is None:
+            raise PolicyRequestError("severity_by_code is unsupported")
         if verdict not in {Verdict.WARN, Verdict.BLOCK}:
             raise PolicyRequestError("severity_by_code cannot configure this verdict")
         result.append((key, verdict))
@@ -299,12 +387,11 @@ def _severity(value: object) -> tuple[tuple[str, Verdict], ...]:
 
 
 def _parse(authoring: bytes) -> dict[str, object]:
-    try:
+    loaded: dict[str, object] | None = None
+    with suppress(UnicodeDecodeError, tomllib.TOMLDecodeError):
         loaded = tomllib.loads(authoring.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-        raise PolicyRequestError("policy authoring is invalid TOML") from error
-    if type(loaded) is not dict:
-        raise PolicyRequestError("policy authoring must be a table")
+    if loaded is None:
+        raise PolicyRequestError("policy authoring is invalid TOML")
     if set(loaded) - set(_TOP_LEVEL_KEYS):
         raise PolicyRequestError("policy authoring contains unknown fields")
     return loaded
@@ -333,7 +420,7 @@ def _compile(authoring: bytes) -> CompiledPolicyV1:
     capabilities = _string_tuple(
         loaded.get("required_adapter_capabilities", []),
         field="required_adapter_capabilities",
-        allowed=_CAPABILITIES,
+        allowed=ADAPTER_CAPABILITY_VOCABULARY_V1,
     )
     approval_ids = _operator_ids(
         loaded.get("approval_operator_ids", []), field="approval_operator_ids"
@@ -348,7 +435,7 @@ def _compile(authoring: bytes) -> CompiledPolicyV1:
     detectors = _string_tuple(
         loaded.get("enabled_detectors", ["capture.unstable", "target.dirty"]),
         field="enabled_detectors",
-        allowed=_DETECTORS,
+        allowed=DETECTOR_CODE_VOCABULARY_V1,
     )
     raw_severity = loaded.get("severity_by_code")
     if raw_severity is None:
@@ -392,13 +479,13 @@ def _compile(authoring: bytes) -> CompiledPolicyV1:
 def load_policy(*, target: Path, explicit: Path | None) -> LoadedPolicy:
     """Load explicit, target-root, or built-in policy without target writes."""
 
-    target = _validated_absolute(target, target=True)
+    target_components = _absolute_components(target, allow_root=True)
     if explicit is not None:
-        explicit = _validated_absolute(explicit, target=False)
-        authoring = _read_explicit(explicit)
+        explicit_components = _absolute_components(explicit, allow_root=False)
+        authoring = _read_explicit(explicit_components)
         source = "explicit"
     else:
-        target_authoring = _read_target(target)
+        target_authoring = _read_target(target_components)
         if target_authoring is None:
             authoring = _BUILTIN_BYTES
             source = "builtin"

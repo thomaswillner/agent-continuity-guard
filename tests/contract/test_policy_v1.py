@@ -1,18 +1,34 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from itertools import combinations
 from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
+from agent_continuity.kernel import model as policy_model
 from agent_continuity.kernel.canonical import canonical_bytes, digest_bytes
 from agent_continuity.kernel.evaluation import Profile, Verdict
-from agent_continuity.kernel.model import AssignmentAuthority, PromotionMode
+from agent_continuity.kernel.model import (
+    AssignmentAuthority,
+    PromotionMode,
+    ResourceLimitsV1,
+)
+from agent_continuity.kernel.records import policy_payload
 from agent_continuity.policy import (
     PolicyRequestError,
     load_policy,
     render_policy_template,
+)
+
+RESOURCE_LIMIT_MAXIMA = (
+    ("max_paths", 250_000),
+    ("max_file_bytes", 1_073_741_824),
+    ("max_aggregate_bytes", 21_474_836_480),
+    ("max_analyzer_text_bytes", 4_194_304),
+    ("max_external_json_bytes", 8_388_608),
 )
 
 
@@ -166,3 +182,134 @@ def test_raw_authoring_bytes_are_absent_from_policy_record(tmp_path: Path) -> No
     ).compiled.record()
 
     assert marker.encode("utf-8") not in record.canonical_bytes
+
+
+def test_policy_request_error_exposes_stable_request_exit_code(tmp_path: Path) -> None:
+    with pytest.raises(PolicyRequestError) as captured:
+        load_policy(target=tmp_path.resolve(), explicit=Path("relative.toml"))
+
+    assert captured.value.exit_code == 2
+    assert type(captured.value.exit_code) is int
+
+
+@pytest.mark.parametrize(
+    ("field", "maximum"),
+    RESOURCE_LIMIT_MAXIMA,
+)
+def test_public_resource_limits_enforce_schema_maxima(field: str, maximum: int) -> None:
+    assert policy_model.RESOURCE_LIMIT_MAXIMA_V1 == RESOURCE_LIMIT_MAXIMA
+    values = dict(RESOURCE_LIMIT_MAXIMA)
+    values[field] = maximum + 1
+
+    with pytest.raises(ValueError):
+        ResourceLimitsV1(**values)
+
+
+def test_public_policy_models_enforce_current_vocabularies(tmp_path: Path) -> None:
+    compiled = load_policy(target=tmp_path.resolve(), explicit=None).compiled
+    assert (
+        frozenset(
+            {
+                "atomic_snapshot",
+                "descriptor_pinned_reads",
+                "git_immutable_objects",
+                "git_network_disabled",
+                "windows_reparse_protection",
+            }
+        )
+        == policy_model.ADAPTER_CAPABILITY_VOCABULARY_V1
+    )
+    assert (
+        frozenset({"capture.unstable", "target.dirty"})
+        == policy_model.DETECTOR_CODE_VOCABULARY_V1
+    )
+
+    with pytest.raises(ValueError):
+        replace(compiled, required_adapter_capabilities=("future",))
+    with pytest.raises(ValueError):
+        replace(
+            compiled,
+            enabled_detectors=("future",),
+            severity_by_code=(("future", Verdict.BLOCK),),
+        )
+
+
+def test_runtime_and_schema_reject_same_order_unique_and_coverage_cases(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[2]
+    schema = json.loads(
+        (root / "schemas/v1/policy.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema)
+    compiled = load_policy(target=tmp_path.resolve(), explicit=None).compiled
+    default_value = json.loads(compiled.record().canonical_bytes)
+    validator.validate(default_value)
+
+    cases = [
+        (
+            {
+                "required_adapter_capabilities": (
+                    "git_network_disabled",
+                    "atomic_snapshot",
+                )
+            },
+            {
+                "required_adapter_capabilities": [
+                    "git_network_disabled",
+                    "atomic_snapshot",
+                ]
+            },
+        ),
+        (
+            {"required_adapter_capabilities": ("atomic_snapshot", "atomic_snapshot")},
+            {"required_adapter_capabilities": ["atomic_snapshot", "atomic_snapshot"]},
+        ),
+        (
+            {
+                "enabled_detectors": ("target.dirty",),
+                "severity_by_code": (
+                    ("capture.unstable", Verdict.BLOCK),
+                    ("target.dirty", Verdict.BLOCK),
+                ),
+            },
+            {
+                "enabled_detectors": ["target.dirty"],
+                "severity_by_code": {
+                    "capture.unstable": "block",
+                    "target.dirty": "block",
+                },
+            },
+        ),
+    ]
+    for runtime_changes, schema_changes in cases:
+        with pytest.raises(ValueError):
+            replace(compiled, **runtime_changes)
+        with pytest.raises(ValidationError):
+            validator.validate({**default_value, **schema_changes})
+
+
+def test_all_canonical_capability_and_detector_subsets_have_schema_parity(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[2]
+    schema = json.loads(
+        (root / "schemas/v1/policy.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema)
+    compiled = load_policy(target=tmp_path.resolve(), explicit=None).compiled
+    capabilities = sorted(policy_model.ADAPTER_CAPABILITY_VOCABULARY_V1)
+    for size in range(len(capabilities) + 1):
+        for subset in combinations(capabilities, size):
+            candidate = replace(compiled, required_adapter_capabilities=subset)
+            validator.validate(json.loads(canonical_bytes(policy_payload(candidate))))
+
+    detectors = sorted(policy_model.DETECTOR_CODE_VOCABULARY_V1)
+    for size in range(len(detectors) + 1):
+        for subset in combinations(detectors, size):
+            candidate = replace(
+                compiled,
+                enabled_detectors=subset,
+                severity_by_code=tuple((code, Verdict.BLOCK) for code in subset),
+            )
+            validator.validate(json.loads(canonical_bytes(policy_payload(candidate))))

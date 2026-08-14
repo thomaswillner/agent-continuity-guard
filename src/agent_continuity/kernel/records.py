@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from .canonical import CanonicalJSONError, canonical_bytes, record_id
 from .evaluation import Profile, Verdict
 from .model import (
+    ADAPTER_CAPABILITY_VOCABULARY_V1,
+    DETECTOR_CODE_VOCABULARY_V1,
     AssignmentAuthority,
     Digest,
     JsonObject,
@@ -72,6 +74,10 @@ class CompiledPolicyV1:
             self.required_adapter_capabilities,
             field="required adapter capabilities",
         )
+        if not set(self.required_adapter_capabilities).issubset(
+            ADAPTER_CAPABILITY_VOCABULARY_V1
+        ):
+            raise CanonicalJSONError("policy adapter capability is unsupported")
         _require_ordered_digest_tuple(
             self.approval_operator_ids,
             field="approval operator identifiers",
@@ -89,6 +95,8 @@ class CompiledPolicyV1:
             self.enabled_detectors,
             field="enabled detectors",
         )
+        if not set(self.enabled_detectors).issubset(DETECTOR_CODE_VOCABULARY_V1):
+            raise CanonicalJSONError("policy detector is unsupported")
         if type(self.severity_by_code) is not tuple or any(
             type(item) is not tuple
             or len(item) != 2

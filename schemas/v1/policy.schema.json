@@ -10,6 +10,45 @@
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "enabled_detectors": {"const": []},
+            "severity_by_code": {"maxProperties": 0}
+          }
+        },
+        {
+          "properties": {
+            "enabled_detectors": {"const": ["capture.unstable"]},
+            "severity_by_code": {
+              "maxProperties": 1,
+              "required": ["capture.unstable"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "enabled_detectors": {"const": ["target.dirty"]},
+            "severity_by_code": {
+              "maxProperties": 1,
+              "required": ["target.dirty"]
+            }
+          }
+        },
+        {
+          "properties": {
+            "enabled_detectors": {"const": ["capture.unstable", "target.dirty"]},
+            "severity_by_code": {
+              "maxProperties": 2,
+              "required": ["capture.unstable", "target.dirty"]
+            }
+          }
+        }
+      ]
+    }
+  ],
   "properties": {
     "approval_operator_ids": {
       "items": {"$ref": "#/$defs/digest"},
@@ -47,18 +86,41 @@
     "profile": {"enum": ["observe", "guard", "strict"]},
     "promotion_mode": {"enum": ["automatic", "review", "disabled"]},
     "required_adapter_capabilities": {
-      "items": {
-        "enum": [
-          "atomic_snapshot",
-          "descriptor_pinned_reads",
-          "git_immutable_objects",
-          "git_network_disabled",
-          "windows_reparse_protection"
-        ]
-      },
-      "maxItems": 5,
-      "type": "array",
-      "uniqueItems": true
+      "oneOf": [
+        {"const": []},
+        {"const": ["atomic_snapshot"]},
+        {"const": ["descriptor_pinned_reads"]},
+        {"const": ["git_immutable_objects"]},
+        {"const": ["git_network_disabled"]},
+        {"const": ["windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads"]},
+        {"const": ["atomic_snapshot", "git_immutable_objects"]},
+        {"const": ["atomic_snapshot", "git_network_disabled"]},
+        {"const": ["atomic_snapshot", "windows_reparse_protection"]},
+        {"const": ["descriptor_pinned_reads", "git_immutable_objects"]},
+        {"const": ["descriptor_pinned_reads", "git_network_disabled"]},
+        {"const": ["descriptor_pinned_reads", "windows_reparse_protection"]},
+        {"const": ["git_immutable_objects", "git_network_disabled"]},
+        {"const": ["git_immutable_objects", "windows_reparse_protection"]},
+        {"const": ["git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "git_immutable_objects"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "git_network_disabled"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "git_immutable_objects", "git_network_disabled"]},
+        {"const": ["atomic_snapshot", "git_immutable_objects", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["descriptor_pinned_reads", "git_immutable_objects", "git_network_disabled"]},
+        {"const": ["descriptor_pinned_reads", "git_immutable_objects", "windows_reparse_protection"]},
+        {"const": ["descriptor_pinned_reads", "git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["git_immutable_objects", "git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "git_immutable_objects", "git_network_disabled"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "git_immutable_objects", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "git_immutable_objects", "git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["descriptor_pinned_reads", "git_immutable_objects", "git_network_disabled", "windows_reparse_protection"]},
+        {"const": ["atomic_snapshot", "descriptor_pinned_reads", "git_immutable_objects", "git_network_disabled", "windows_reparse_protection"]}
+      ],
+      "type": "array"
     },
     "rollback_operator_ids": {
       "items": {"$ref": "#/$defs/digest"},

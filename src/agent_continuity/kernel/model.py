@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import NewType, TypeAlias
+from typing import Final, NewType, TypeAlias
 
 JsonScalar: TypeAlias = bool | int | str | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -14,6 +14,24 @@ RecordId = NewType("RecordId", str)
 Digest = NewType("Digest", str)
 LogicalTime = NewType("LogicalTime", str)
 SensitiveLocalText = NewType("SensitiveLocalText", str)
+
+RESOURCE_LIMIT_MAXIMA_V1: Final = (
+    ("max_paths", 250_000),
+    ("max_file_bytes", 1_073_741_824),
+    ("max_aggregate_bytes", 21_474_836_480),
+    ("max_analyzer_text_bytes", 4_194_304),
+    ("max_external_json_bytes", 8_388_608),
+)
+ADAPTER_CAPABILITY_VOCABULARY_V1: Final = frozenset(
+    {
+        "atomic_snapshot",
+        "descriptor_pinned_reads",
+        "git_immutable_objects",
+        "git_network_disabled",
+        "windows_reparse_protection",
+    }
+)
+DETECTOR_CODE_VOCABULARY_V1: Final = frozenset({"capture.unstable", "target.dirty"})
 
 
 class AssignmentAuthority(StrEnum):
@@ -51,6 +69,9 @@ class ResourceLimitsV1:
         )
         if any(type(value) is not int or value < 1 for value in values):
             raise ValueError("resource limits must be positive exact integers")
+        for field, maximum in RESOURCE_LIMIT_MAXIMA_V1:
+            if getattr(self, field) > maximum:
+                raise ValueError("resource limit exceeds Policy/v1 maximum")
         if self.max_analyzer_text_bytes > self.max_file_bytes:
             raise ValueError("analyzer limit cannot exceed file limit")
         if self.max_file_bytes > self.max_aggregate_bytes:
