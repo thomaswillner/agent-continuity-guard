@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 34,
+  "revision": 35,
   "contract": {
     "revision": 3,
     "goal": {
@@ -106,6 +106,7 @@
       "Task 4 breaker-round commit f89af77 restores safe legacy AuditEvent/v1 replay and immutable details privacy. Maker evidence passes 118 focused, 393 full, 19 residual, schema, typing, lint, DCO, package/install, dependency, MIT, kernel-purity, exact-path, and secret gates. Final independent review at sha256:a23b0be5b6384ddf21e408f6fb135b33d931dddbf78b6b32082ede6664e7b423 confirms compatibility/privacy but blocks acceptance because AuditEventDraft replaced the documented dataclass field details with _details_bytes, breaking fields, asdict, replace, and positional matching. Five fix rounds are exhausted; Task 5 cannot begin without explicit post-breaker authorization or a public-contract waiver.",
       "On 2026-08-14 Thomas selected execution option 1, authorizing subagent-driven development and one post-breaker Task 4 remediation cycle without waiving the public dataclass defect. The admitted slice is public-regression RED, minimal compatibility-preserving implementation, current Task 4 gates, and one independent immutable review; Task 5 remains blocked until that review passes.",
       "Task 4 post-breaker commits a30f9ea and 07fa057 restore the public details dataclass contract plus standard copy, deepcopy, and pickle reconstruction while preserving canonical storage, defensive snapshots, exact retry, and replay compatibility. Independent spec and scoped quality reviews pass with no open Critical/Important finding. Controller evidence passes 396 full tests, strict mypy, Ruff, 12 schemas, source and clean-wheel public probes, exact two-path inventory, DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree ffdd8c8c73c77883136a63032c4210df026ef686.",
+      "Task 5 commits 4f73cdf, d8ec27a, and b90840a implement strict descriptor-pinned TOML policy compilation, canonical Policy/v1 identity, built-in guard defaults, strict public model/schema parity, sanitized errors, fail-closed no-follow reads, target-read-only precedence, and canonical template output. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 453 full and 91 focused tests, strict mypy, Ruff, 14 schemas, clean-wheel policy smoke, exact ten-path inventory, three DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 8e2caf00f6dc0868edc11dc90e0d4b8c69e87165.",
       "On 2026-08-13 Thomas approved category-correct benchmarking, zero-waiver production gates, the best-in-tested-scope claim rule, a public development corpus plus sealed holdout, and Python 3.11-3.14 across macOS/Linux/Windows. The approval authorizes design artifacts; written-specification review remains the implementation-planning gate.",
       "Fresh installed-wheel proof on 2026-08-13 built and imported agent-continuity-guard 0.1.0.dev0 under Python 3.12, while installed acg --help exited 1 with ModuleNotFoundError for agent_continuity.cli.",
       "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md."
@@ -131,6 +132,7 @@
       "Stopped at the five-round breaker with one public dataclass-reflection regression; did not silently waive the planned AuditEventDraft field contract or begin dependent Task 5.",
       "Admitted one post-breaker Task 4 remediation cycle after explicit operator selection of subagent-driven execution; the defect remains load-bearing and no waiver, relabeling, or downstream execution is authorized.",
       "Closed Task 4 without waiver after public dataclass lifecycle regressions covered fields, asdict, replace, positional matching, copy, deepcopy, pickle, mutation isolation, persistence, and exact retry through public tests and clean installed-wheel probes.",
+      "Closed Task 5 without waiver after component-pinned path, traceback sanitization, runtime/schema parity, public request-exit, full identity mutation, and missing-no-follow regressions passed independent review and installed-wheel verification.",
       "Amended the success contract without waiving historical failures: production readiness and comparative superiority are separate, category-correct, zero-waiver gates.",
       "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning.",
       "Thomas approved the written specification and then explicitly added U-shaped lost-in-the-middle containment as the next objective using the already described canonical-projection, structured-probe, verified-transition architecture.",
@@ -193,7 +195,7 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 4,
+      "implementation_plan_tasks": 5,
       "task4_fix_rounds": 5,
       "task4_post_breaker_attempts": 1,
       "task4_post_breaker_reviews": 1,
@@ -203,11 +205,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "foundation.task5.strict_policy_contract",
-    "symptom": "Policy/v1 compiler, strict source precedence, schemas, read-only capture, and canonical template are not implemented.",
-    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-5-brief.md",
-    "hypothesis": "One descriptor-pinned strict TOML compilation seam can bind authoring identity and compiled policy without persisting raw policy bytes or mutating the target."
+    "gate": "foundation.task6.initialization_checkpoint",
+    "symptom": "Continuity.open and initialization records, A/B/C transition gating, idempotent genesis checkpoint, and public receipt are not implemented.",
+    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-6-brief.md",
+    "hypothesis": "Content-addressed initialization intent plus one CAS transaction can make identical initialization idempotent while A/B/C capture refuses target drift without writes."
   },
-  "next_action": "Dispatch a fresh TDD maker for Foundation Task 5 strict policy compilation, then independently review the exact maker range before Task 6.",
+  "next_action": "Dispatch a fresh TDD maker for Foundation Task 6 initialization and first checkpoint, then independently review the exact maker range before Task 7.",
   "verdict": "IN_PROGRESS"
 }
