@@ -133,9 +133,12 @@ def _absolute_components(path: Path, *, allow_root: bool) -> tuple[str, ...]:
 
 
 def _file_flags() -> int:
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if type(no_follow) is not int or no_follow <= 0:
+        raise PolicyRequestError("no-follow policy reads are unsupported")
     flags = os.O_RDONLY
     flags |= getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= no_follow
     return flags
 
 

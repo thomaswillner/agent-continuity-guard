@@ -171,3 +171,26 @@ def test_explicit_policy_replacement_after_final_pin_uses_pinned_bytes(
 
     assert replaced
     assert loaded.compiled.profile.value == "guard"
+
+
+def test_missing_no_follow_primitive_fails_before_any_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path.resolve()
+    opened = False
+
+    def unexpected_open(*_args: object, **_kwargs: object) -> int:
+        nonlocal opened
+        opened = True
+        raise AssertionError("os.open must not run without O_NOFOLLOW")
+
+    monkeypatch.delattr(os, "O_NOFOLLOW")
+    monkeypatch.setattr(os, "open", unexpected_open)
+
+    with pytest.raises(PolicyRequestError) as captured:
+        load_policy(target=target, explicit=None)
+
+    assert not opened
+    assert captured.value.exit_code == 2
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
