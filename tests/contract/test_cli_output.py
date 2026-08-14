@@ -39,6 +39,32 @@ def test_console_module_emits_one_canonical_value() -> None:
     assert _payload(result)["schema"] == "PolicyTemplate/v1"
 
 
+def test_top_level_help_is_deterministic_human_facing_command_inventory() -> None:
+    first = _command("--help")
+    repeated = _command("--help")
+
+    expected = (
+        b"usage: acg --help\n"
+        b"\n"
+        b"commands:\n"
+        b"  policy-template\n"
+        b"  init\n"
+        b"  checkpoint\n"
+        b"  verify\n"
+        b"  verify-audit\n"
+        b"  audit-anchor\n"
+    )
+    assert first.returncode == 0
+    assert first.stderr == b""
+    assert first.stdout == expected
+    assert (repeated.returncode, repeated.stdout, repeated.stderr) == (
+        first.returncode,
+        first.stdout,
+        first.stderr,
+    )
+    assert os.fsencode(ROOT) not in first.stdout
+
+
 def test_policy_template_is_canonical_complete_and_quiet() -> None:
     result = _command("policy-template")
 

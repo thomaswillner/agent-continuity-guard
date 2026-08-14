@@ -53,6 +53,18 @@ _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS: frozenset[int] = frozenset(
     if type(value) is int
 )
 
+_TOP_LEVEL_HELP = (
+    b"usage: acg --help\n"
+    b"\n"
+    b"commands:\n"
+    b"  policy-template\n"
+    b"  init\n"
+    b"  checkpoint\n"
+    b"  verify\n"
+    b"  verify-audit\n"
+    b"  audit-anchor\n"
+)
+
 
 class _Parser(argparse.ArgumentParser):
     def error(self, _message: str) -> NoReturn:
@@ -369,9 +381,13 @@ def _emit(payload: JsonObject) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    arguments = tuple(sys.argv[1:] if argv is None else argv)
+    if arguments == ("--help",):
+        sys.stdout.buffer.write(_TOP_LEVEL_HELP)
+        return 0
     try:
-        arguments = _parser().parse_args(argv)
-        _emit(_run(arguments))
+        parsed = _parser().parse_args(arguments)
+        _emit(_run(parsed))
         return 0
     except (
         CLIRequestError,
