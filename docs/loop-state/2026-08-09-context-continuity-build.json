@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 35,
+  "revision": 36,
   "contract": {
     "revision": 3,
     "goal": {
@@ -107,6 +107,7 @@
       "On 2026-08-14 Thomas selected execution option 1, authorizing subagent-driven development and one post-breaker Task 4 remediation cycle without waiving the public dataclass defect. The admitted slice is public-regression RED, minimal compatibility-preserving implementation, current Task 4 gates, and one independent immutable review; Task 5 remains blocked until that review passes.",
       "Task 4 post-breaker commits a30f9ea and 07fa057 restore the public details dataclass contract plus standard copy, deepcopy, and pickle reconstruction while preserving canonical storage, defensive snapshots, exact retry, and replay compatibility. Independent spec and scoped quality reviews pass with no open Critical/Important finding. Controller evidence passes 396 full tests, strict mypy, Ruff, 12 schemas, source and clean-wheel public probes, exact two-path inventory, DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree ffdd8c8c73c77883136a63032c4210df026ef686.",
       "Task 5 commits 4f73cdf, d8ec27a, and b90840a implement strict descriptor-pinned TOML policy compilation, canonical Policy/v1 identity, built-in guard defaults, strict public model/schema parity, sanitized errors, fail-closed no-follow reads, target-read-only precedence, and canonical template output. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 453 full and 91 focused tests, strict mypy, Ruff, 14 schemas, clean-wheel policy smoke, exact ten-path inventory, three DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 8e2caf00f6dc0868edc11dc90e0d4b8c69e87165.",
+      "Task 6 commits 1d28d26, bf8ec60, and 68c9430 implement public Continuity initialization, pure content-addressed genesis records, A/B/C drift refusal, cross-process exact idempotency, linked-worktree Git metadata exclusion, nested identity validation, sanitized request errors, and exhaustive semantic schema admission. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 498 full and 79 focused tests, strict mypy, Ruff, 23 schemas, clean-wheel initialization/idempotency smoke, exact 17-path inventory, three DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 6dc9a046cab7230a061f51cccbaa7ad03a80980e.",
       "On 2026-08-13 Thomas approved category-correct benchmarking, zero-waiver production gates, the best-in-tested-scope claim rule, a public development corpus plus sealed holdout, and Python 3.11-3.14 across macOS/Linux/Windows. The approval authorizes design artifacts; written-specification review remains the implementation-planning gate.",
       "Fresh installed-wheel proof on 2026-08-13 built and imported agent-continuity-guard 0.1.0.dev0 under Python 3.12, while installed acg --help exited 1 with ModuleNotFoundError for agent_continuity.cli.",
       "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md."
@@ -133,6 +134,7 @@
       "Admitted one post-breaker Task 4 remediation cycle after explicit operator selection of subagent-driven execution; the defect remains load-bearing and no waiver, relabeling, or downstream execution is authorized.",
       "Closed Task 4 without waiver after public dataclass lifecycle regressions covered fields, asdict, replace, positional matching, copy, deepcopy, pickle, mutation isolation, persistence, and exact retry through public tests and clean installed-wheel probes.",
       "Closed Task 5 without waiver after component-pinned path, traceback sanitization, runtime/schema parity, public request-exit, full identity mutation, and missing-no-follow regressions passed independent review and installed-wheel verification.",
+      "Closed Task 6 without waiver after real two-process races, common Git-directory overlap, full checkpoint semantic admission, forged child identity, missing-target sanitization, target-read-only, one-event genesis, and installed-wheel idempotency passed independent review.",
       "Amended the success contract without waiving historical failures: production readiness and comparative superiority are separate, category-correct, zero-waiver gates.",
       "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning.",
       "Thomas approved the written specification and then explicitly added U-shaped lost-in-the-middle containment as the next objective using the already described canonical-projection, structured-probe, verified-transition architecture.",
@@ -195,7 +197,7 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 5,
+      "implementation_plan_tasks": 6,
       "task4_fix_rounds": 5,
       "task4_post_breaker_attempts": 1,
       "task4_post_breaker_reviews": 1,
@@ -205,11 +207,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "foundation.task6.initialization_checkpoint",
-    "symptom": "Continuity.open and initialization records, A/B/C transition gating, idempotent genesis checkpoint, and public receipt are not implemented.",
-    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-6-brief.md",
-    "hypothesis": "Content-addressed initialization intent plus one CAS transaction can make identical initialization idempotent while A/B/C capture refuses target drift without writes."
+    "gate": "foundation.task7.checkpoint_verify",
+    "symptom": "Subsequent checkpoint and pure verify APIs, parent linkage, reason binding, drift refusal, and store-read-only verification are not implemented.",
+    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-7-brief.md",
+    "hypothesis": "A/B/C capture plus parent-head CAS can append one checkpoint, while pure verify can compare current capture to immutable state without any store mutation."
   },
-  "next_action": "Dispatch a fresh TDD maker for Foundation Task 6 initialization and first checkpoint, then independently review the exact maker range before Task 7.",
+  "next_action": "Dispatch a fresh TDD maker for Foundation Task 7 subsequent checkpoint and pure verify, then independently review before Task 8.",
   "verdict": "IN_PROGRESS"
 }
