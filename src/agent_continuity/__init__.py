@@ -5,6 +5,7 @@ from agent_continuity.api import (
     CheckpointReceipt,
     Continuity,
     ContinuityError,
+    ContinuityRequestError,
     TransitionRefused,
 )
 from agent_continuity.kernel.evaluation import Profile
@@ -17,6 +18,7 @@ __all__ = [
     "CheckpointReceipt",
     "Continuity",
     "ContinuityError",
+    "ContinuityRequestError",
     "Profile",
     "PromotionMode",
     "TransitionRefused",

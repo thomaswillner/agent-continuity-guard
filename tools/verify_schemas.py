@@ -85,6 +85,23 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         is None
     ):
         raise SchemaVerificationError("invalid_golden")
+    if name == "actor.schema.json":
+        scope_ids = instance.get("scope_ids")
+        if isinstance(scope_ids, list) and scope_ids != sorted(scope_ids):
+            raise SchemaVerificationError("invalid_instance")
+    if name == "ruleset.schema.json":
+        rule_ids = instance.get("rule_ids")
+        if isinstance(rule_ids, list) and rule_ids != sorted(rule_ids):
+            raise SchemaVerificationError("invalid_instance")
+    if name == "checkpoint.schema.json":
+        criteria = instance.get("acceptance_criteria")
+        if isinstance(criteria, list):
+            ordinals = [
+                item.get("ordinal") if isinstance(item, dict) else None
+                for item in criteria
+            ]
+            if ordinals != list(range(len(criteria))):
+                raise SchemaVerificationError("invalid_instance")
 
 
 def schema_validator(

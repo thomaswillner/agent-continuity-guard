@@ -400,6 +400,8 @@ class CheckpointV1:
             range(len(self.acceptance_criteria))
         ):
             raise CanonicalJSONError("checkpoint criterion ordinals are invalid")
+        for criterion in self.acceptance_criteria:
+            criterion.record()
         criterion_ids = tuple(item.criterion_id for item in self.acceptance_criteria)
         if len(criterion_ids) != len(set(criterion_ids)):
             raise CanonicalJSONError("checkpoint criterion identities must be unique")
@@ -421,6 +423,8 @@ class CheckpointV1:
             type(item) is not WorkItemV1 for item in self.pending_work
         ):
             raise CanonicalJSONError("checkpoint pending work is invalid")
+        for work_item in self.pending_work:
+            work_item.record()
         _require_ordered_model_ids(
             tuple(item.work_item_id for item in self.pending_work),
             field="checkpoint work item identifiers",
@@ -429,6 +433,8 @@ class CheckpointV1:
             type(item) is not UnresolvedItemV1 for item in self.unresolved
         ):
             raise CanonicalJSONError("checkpoint unresolved items are invalid")
+        for unresolved_item in self.unresolved:
+            unresolved_item.record()
         _require_ordered_model_ids(
             tuple(item.unresolved_id for item in self.unresolved),
             field="checkpoint unresolved identifiers",

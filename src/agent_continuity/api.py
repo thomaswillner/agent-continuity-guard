@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+import time
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
 from typing import Final
@@ -41,26 +43,35 @@ from agent_continuity.store import (
     SensitiveLocalValueDraft,
     SQLiteStateStore,
     StoreConflictError,
+    StoreIntegrityError,
     open_external_state_root,
     resolve_state_home,
 )
+from agent_continuity.store.paths import StatePathError
 
 _DATABASE_LOCKS: dict[tuple[Path, str], Lock] = {}
 _DATABASE_LOCKS_GUARD = Lock()
 _PRODUCER_NAME: Final = "agent-continuity-guard"
 _PRODUCER_VERSION: Final = "0.1.0.dev0"
+_STORE_OPEN_ATTEMPTS: Final = 100
+_STORE_OPEN_MAX_DELAY_SECONDS: Final = 0.05
 
 __all__ = [
     "AlreadyInitialized",
     "CheckpointReceipt",
     "Continuity",
     "ContinuityError",
+    "ContinuityRequestError",
     "TransitionRefused",
 ]
 
 
 class ContinuityError(RuntimeError):
     """Base class for public continuity orchestration failures."""
+
+
+class ContinuityRequestError(ContinuityError, ValueError):
+    """Caller input is invalid; message and exception links are sanitized."""
 
 
 class TransitionRefused(ContinuityError):
@@ -79,6 +90,49 @@ def _database_lock(state_home: Path, name: str) -> Lock:
     key = (state_home, name)
     with _DATABASE_LOCKS_GUARD:
         return _DATABASE_LOCKS.setdefault(key, Lock())
+
+
+@contextmanager
+def _open_store_with_bounded_reconciliation(
+    *,
+    target: Path,
+    git_directory: Path | None,
+    state_home: Path,
+    database_name: str,
+    store_id: str,
+) -> Iterator[SQLiteStateStore]:
+    """Adopt a concurrently created store or fail closed after a fixed bound."""
+
+    for attempt in range(_STORE_OPEN_ATTEMPTS):
+        state_root = None
+        try:
+            state_root = open_external_state_root(
+                target,
+                git_directory,
+                state_home,
+            )
+            store = SQLiteStateStore(
+                state_root,
+                database_name=database_name,
+                store_id=store_id,
+            )
+        except (StatePathError, StoreIntegrityError):
+            if state_root is not None:
+                state_root.close()
+            if attempt + 1 == _STORE_OPEN_ATTEMPTS:
+                raise
+            delay = min(
+                0.001 * (attempt + 1),
+                _STORE_OPEN_MAX_DELAY_SECONDS,
+            )
+            time.sleep(delay)
+            continue
+        try:
+            yield store
+        finally:
+            store.close()
+        return
+    raise AssertionError("bounded store-open loop did not terminate")
 
 
 def _producer_identity() -> ProducerIdentity:
@@ -134,6 +188,7 @@ class Continuity:
         self,
         *,
         target: Path,
+        git_directory: Path | None,
         state_home: Path,
         session_key: str,
         clock: Clock,
@@ -141,6 +196,7 @@ class Continuity:
         loaded_policy: LoadedPolicy,
     ) -> None:
         self._target = target
+        self._git_directory = git_directory
         self._state_home = state_home
         self._session_key = session_key
         self._clock = clock
@@ -160,9 +216,16 @@ class Continuity:
         clock: Clock | None = None,
         target_adapter: TargetAdapter | None = None,
     ) -> Continuity:
-        target_path = Path(target).resolve(strict=True)
-        if not target_path.is_dir():
-            raise ValueError("continuity target must be a directory")
+        target_path: Path | None = None
+        try:
+            candidate = Path(target)
+            resolved = candidate.resolve(strict=True)
+            if resolved.is_dir():
+                target_path = resolved
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+        if target_path is None:
+            raise ContinuityRequestError("continuity target is unavailable")
         selected_policy = load_policy(
             target=target_path,
             explicit=None if policy is None else Path(policy),
@@ -187,8 +250,14 @@ class Continuity:
             if target_adapter is None
             else target_adapter
         )
+        git_directory = (
+            adapter.git_common_directory
+            if isinstance(adapter, GitTargetAdapter)
+            else None
+        )
         return cls(
             target=target_path,
+            git_directory=git_directory,
             state_home=resolve_state_home(state_home),
             session_key=session_key,
             clock=SystemClock() if clock is None else clock,
@@ -313,11 +382,10 @@ class Continuity:
         )
         with (
             _database_lock(self._state_home, database_name),
-            open_external_state_root(
-                self._target, None, self._state_home
-            ) as state_root,
-            SQLiteStateStore(
-                state_root,
+            _open_store_with_bounded_reconciliation(
+                target=self._target,
+                git_directory=self._git_directory,
+                state_home=self._state_home,
                 database_name=database_name,
                 store_id=store_id,
             ) as store,

@@ -1,33 +1,62 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import os
 import sqlite3
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from agent_continuity import (
     AlreadyInitialized,
     CheckpointReceipt,
     Continuity,
+    ContinuityRequestError,
     Profile,
     PromotionMode,
     TransitionRefused,
 )
 from agent_continuity.capture import CaptureSnapshot, GitTargetAdapter
-from agent_continuity.kernel.canonical import digest_bytes, record_id
-from agent_continuity.kernel.model import LogicalTime
+from agent_continuity.kernel.canonical import (
+    CanonicalJSONError,
+    canonical_loads,
+    digest_bytes,
+    record_id,
+)
+from agent_continuity.kernel.model import (
+    AssignmentAuthority,
+    LogicalTime,
+    RecordId,
+)
+from agent_continuity.kernel.paths import PathScopeKind, PathScopeV1
 from agent_continuity.kernel.records import (
+    ActorV1,
+    CriterionV1,
+    ProducerIdentity,
+    RulesetV1,
+    actor_payload,
+    build_actor,
+    build_checkpoint,
+    build_criterion,
     build_unresolved_item,
     build_work_item,
+    checkpoint_payload,
+    ruleset_payload,
 )
+from agent_continuity.store.paths import StatePathError
 from tests.helpers.git_repo import (
+    GitRepo,
     make_git_repo,
     repository_write_manifest,
 )
+from tools import verify_schemas
 
 
 class FixedClock:
@@ -52,6 +81,52 @@ class CaptureSequence:
             snapshot = self._snapshots[self._index]
             self._index += 1
             return snapshot
+
+
+class ProcessBarrierAdapter:
+    def __init__(self, target: str, barrier: Any) -> None:
+        self._adapter = GitTargetAdapter(target)
+        self._barrier = barrier
+        self._captures = 0
+
+    def capture(self, instruction_paths: tuple[bytes, ...]) -> CaptureSnapshot:
+        snapshot = self._adapter.capture(instruction_paths)
+        self._captures += 1
+        if self._captures == 3:
+            self._barrier.wait(timeout=15)
+        return snapshot
+
+
+def _process_initialize(
+    target: str,
+    state_home: str,
+    barrier: Any,
+    results: Any,
+    goal: str,
+) -> None:
+    try:
+        continuity = Continuity.open(
+            target,
+            state_home=state_home,
+            session_key="process-race",
+            clock=FixedClock("2026-08-14T12:00:00Z"),
+            target_adapter=ProcessBarrierAdapter(target, barrier),
+        )
+        receipt = continuity.initialize(
+            goal,
+            ("criterion",),
+            instruction_paths=("AGENTS.md",),
+        )
+        results.put(
+            (
+                "receipt",
+                receipt.checkpoint_id,
+                receipt.audit_event_id,
+                receipt.audit_sequence,
+            )
+        )
+    except Exception as error:
+        results.put(("error", type(error).__name__, str(error)))
 
 
 def _snapshot(tmp_path: Path) -> tuple[Path, CaptureSnapshot]:
@@ -108,6 +183,14 @@ def _payload(raw: bytes) -> dict[str, object]:
     value = json.loads(raw)
     assert isinstance(value, dict)
     return value
+
+
+def _schema_documents() -> dict[str, dict[str, Any]]:
+    root = Path(__file__).parents[2] / "schemas" / "v1"
+    return {
+        path.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in root.glob("*.schema.json")
+    }
 
 
 def test_initialize_commits_exact_genesis_records_receipt_and_local_values(
@@ -332,6 +415,48 @@ def test_concurrent_identical_initialize_reconciles_to_one_exact_receipt(
         assert connection.execute("SELECT COUNT(*) FROM heads").fetchone() == (1,)
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_two_process_initialization_race_is_exact_and_atomic(
+    tmp_path: Path,
+    changed: bool,
+) -> None:
+    target, _snapshot_value = _snapshot(tmp_path)
+    state_home = tmp_path / "process-state"
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(2)
+    results = context.Queue()
+    goals = ("same goal", "changed goal" if changed else "same goal")
+    processes = tuple(
+        context.Process(
+            target=_process_initialize,
+            args=(str(target), str(state_home), barrier, results, goal),
+        )
+        for goal in goals
+    )
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=30)
+        assert process.exitcode == 0
+    observed = tuple(sorted(results.get(timeout=5) for _process in processes))
+
+    if changed:
+        assert tuple(item[0] for item in observed) == ("error", "receipt")
+        assert observed[0][1:] == (
+            "AlreadyInitialized",
+            "session already has a different initialization intent",
+        )
+    else:
+        assert observed[0][0] == observed[1][0] == "receipt"
+        assert observed[0][1:] == observed[1][1:]
+    with sqlite3.connect(_database(state_home)) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM audit_events"
+        ).fetchone() == (1,)
+        assert connection.execute("SELECT COUNT(*) FROM heads").fetchone() == (1,)
+
+
 def test_facade_policy_overrides_are_recompiled_into_effective_identity(
     tmp_path: Path,
 ) -> None:
@@ -393,3 +518,254 @@ def test_distinct_session_keys_have_independent_atomic_genesis(tmp_path: Path) -
     assert first.audit_sequence == second.audit_sequence == 1
     assert first.checkpoint_id != second.checkpoint_id
     assert len(tuple(state_home.glob("*.sqlite3"))) == 2
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_initialize_rejects_state_under_pinned_git_common_directory(
+    tmp_path: Path,
+    linked: bool,
+) -> None:
+    primary_base = tmp_path / "primary"
+    primary_base.mkdir()
+    primary = make_git_repo(primary_base)
+    target = primary.root
+    if linked:
+        linked_root = tmp_path / "linked"
+        primary.git(
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked-state-guard",
+            os.fspath(linked_root),
+        )
+        target = GitRepo(linked_root).root
+    state_home = primary.git_dir / "must-not-create-state"
+
+    continuity = Continuity.open(target, state_home=state_home)
+    with pytest.raises(StatePathError):
+        continuity.initialize(
+            "goal",
+            (),
+            instruction_paths=("AGENTS.md",),
+        )
+
+    assert not state_home.exists()
+
+
+def test_custom_adapter_still_rejects_state_overlapping_target(tmp_path: Path) -> None:
+    target, snapshot = _snapshot(tmp_path)
+    state_home = target / "must-not-create-state"
+
+    with pytest.raises(StatePathError):
+        _continuity(target, state_home, (snapshot,) * 3).initialize(
+            "goal",
+            (),
+            instruction_paths=("AGENTS.md",),
+        )
+
+    assert not state_home.exists()
+
+
+@pytest.mark.parametrize("record_type", ["actor", "ruleset"])
+def test_schema_admission_rejects_runtime_rejected_unsorted_identifiers(
+    record_type: str,
+) -> None:
+    digest_a = RecordId("sha256:" + "a" * 64)
+    digest_b = RecordId("sha256:" + "b" * 64)
+    schemas = _schema_documents()
+    if record_type == "actor":
+        producer = ProducerIdentity(
+            "agent-continuity-guard",
+            "0.1.0.dev0",
+            digest_a,
+        )
+        with pytest.raises(CanonicalJSONError):
+            ActorV1(
+                digest_a,
+                producer,
+                AssignmentAuthority.READ_ONLY,
+                (digest_b, digest_a),
+            )
+        valid = build_actor(
+            producer=producer,
+            authority=AssignmentAuthority.READ_ONLY,
+            scope_ids=(digest_a, digest_b),
+        )
+        schema_name = "actor.schema.json"
+        invalid = {
+            **actor_payload(valid),
+            "scope_ids": [digest_b, digest_a],
+        }
+    else:
+        with pytest.raises(CanonicalJSONError):
+            RulesetV1(digest_a, (digest_b, digest_a))
+        valid = RulesetV1(
+            record_id("Ruleset", "v1", {"rule_ids": [digest_a, digest_b]}),
+            (digest_a, digest_b),
+        )
+        schema_name = "ruleset.schema.json"
+        invalid = {"rule_ids": [digest_b, digest_a]}
+
+    valid_payload = (
+        actor_payload(valid)
+        if record_type == "actor"
+        else ruleset_payload(valid)
+    )
+    verify_schemas.validate_schema_instance(
+        schema_name,
+        valid_payload,
+        schemas,
+    )
+    with pytest.raises(verify_schemas.SchemaVerificationError):
+        verify_schemas.validate_schema_instance(schema_name, invalid, schemas)
+
+
+def test_schema_admission_rejects_noncontiguous_checkpoint_criteria() -> None:
+    schemas = _schema_documents()
+    invalid = verify_schemas.schema_goldens()["checkpoint.schema.json"]
+    invalid = {
+        **invalid,
+        "acceptance_criteria": [
+            invalid["acceptance_criteria"][0],
+            {
+                **invalid["acceptance_criteria"][0],
+                "criterion_id": "sha256:" + "2" * 64,
+                "ordinal": 2,
+            },
+        ],
+    }
+
+    with pytest.raises(verify_schemas.SchemaVerificationError):
+        verify_schemas.validate_schema_instance(
+            "checkpoint.schema.json",
+            invalid,
+            schemas,
+        )
+
+    digest = digest_bytes(b"criterion parity")
+    contiguous = build_criterion(ordinal=0, digest=digest)
+    skipped = build_criterion(ordinal=2, digest=digest)
+    scope = PathScopeV1(path=None, kind=PathScopeKind.TREE)
+    arguments = {
+        "parent_checkpoint_id": None,
+        "target_id": RecordId(digest),
+        "goal_id": RecordId(digest),
+        "constraint_digests": (),
+        "instruction_id": RecordId(digest),
+        "policy_id": RecordId(digest),
+        "ruleset_id": RecordId(digest),
+        "actor_ids": (RecordId(digest),),
+        "evidence_ids": (),
+        "invalidation_ids": (),
+        "accepted_decision_ids": (),
+        "pending_work": (),
+        "unresolved": (),
+        "assignment_authority": AssignmentAuthority.READ_ONLY,
+        "authority_scopes": (scope,),
+        "open_assignment_ids": (),
+        "audit_parent_id": None,
+        "initialization_intent_id": RecordId(digest),
+        "created_at": LogicalTime("2026-08-14T12:00:00Z"),
+    }
+    with pytest.raises(CanonicalJSONError):
+        build_checkpoint(
+            acceptance_criteria=(contiguous, skipped),
+            **arguments,
+        )
+    runtime_valid = build_checkpoint(
+        acceptance_criteria=(contiguous,),
+        **arguments,
+    )
+    verify_schemas.validate_schema_instance(
+        "checkpoint.schema.json",
+        checkpoint_payload(runtime_valid),
+        schemas,
+    )
+
+
+def test_canonical_loader_blocks_float_before_mathematical_integer_schema() -> None:
+    schemas = _schema_documents()
+    digest = "sha256:" + "1" * 64
+    raw = ('{"digest":"' + digest + '","ordinal":1.0}').encode()
+    parsed = json.loads(raw)
+    assert Draft202012Validator(
+        schemas["criterion.schema.json"]
+    ).is_valid(parsed)
+
+    with pytest.raises(CanonicalJSONError):
+        canonical_loads(raw)
+    with pytest.raises(CanonicalJSONError):
+        CriterionV1(RecordId(digest), 1.0, digest)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("child", ["criterion", "work", "unresolved"])
+def test_checkpoint_rejects_forged_nested_child_identity(child: str) -> None:
+    digest = digest_bytes(b"checkpoint child")
+    criterion = build_criterion(ordinal=0, digest=digest)
+    work = build_work_item(kind="task", status_code="pending", digest=digest)
+    unresolved = build_unresolved_item(code="unknown", digest=digest)
+    scope = PathScopeV1(path=None, kind=PathScopeKind.TREE)
+    checkpoint = build_checkpoint(
+        parent_checkpoint_id=None,
+        target_id=RecordId(digest),
+        goal_id=RecordId(digest),
+        acceptance_criteria=(criterion,),
+        constraint_digests=(),
+        instruction_id=RecordId(digest),
+        policy_id=RecordId(digest),
+        ruleset_id=RecordId(digest),
+        actor_ids=(RecordId(digest),),
+        evidence_ids=(),
+        invalidation_ids=(),
+        accepted_decision_ids=(),
+        pending_work=(work,),
+        unresolved=(unresolved,),
+        assignment_authority=AssignmentAuthority.READ_ONLY,
+        authority_scopes=(scope,),
+        open_assignment_ids=(),
+        audit_parent_id=None,
+        initialization_intent_id=RecordId(digest),
+        created_at=LogicalTime("2026-08-14T12:00:00Z"),
+    )
+    forged = RecordId("sha256:" + "f" * 64)
+    changes: dict[str, object]
+    if child == "criterion":
+        changes = {
+            "acceptance_criteria": (
+                replace(criterion, criterion_id=forged),
+            )
+        }
+    elif child == "work":
+        changes = {"pending_work": (replace(work, work_item_id=forged),)}
+    else:
+        changes = {
+            "unresolved": (
+                replace(unresolved, unresolved_id=forged),
+            )
+        }
+
+    with pytest.raises(CanonicalJSONError):
+        replace(checkpoint, **changes)
+
+
+def test_missing_target_path_maps_to_fully_sanitized_request_error(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "raw-missing-target-marker"
+
+    with pytest.raises(ContinuityRequestError) as captured:
+        Continuity.open(missing)
+
+    error = captured.value
+    rendered = "\n".join(
+        (
+            str(error),
+            repr(error),
+            "".join(traceback.format_exception(error)),
+        )
+    )
+    assert str(missing) not in rendered
+    assert missing.name not in rendered
+    assert error.__cause__ is None
+    assert error.__context__ is None
