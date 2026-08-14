@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import multiprocessing
 import os
@@ -12,7 +13,7 @@ from threading import Lock
 from typing import Any
 
 import pytest
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, ValidationError
 
 from agent_continuity import (
     AlreadyInitialized,
@@ -26,6 +27,7 @@ from agent_continuity import (
 from agent_continuity.capture import CaptureSnapshot, GitTargetAdapter
 from agent_continuity.kernel.canonical import (
     CanonicalJSONError,
+    canonical_bytes,
     canonical_loads,
     digest_bytes,
     record_id,
@@ -35,7 +37,12 @@ from agent_continuity.kernel.model import (
     LogicalTime,
     RecordId,
 )
-from agent_continuity.kernel.paths import PathScopeKind, PathScopeV1
+from agent_continuity.kernel.paths import (
+    PathIdentityV1,
+    PathScopeKind,
+    PathScopeV1,
+    path_scope_payload,
+)
 from agent_continuity.kernel.records import (
     ActorV1,
     CriterionV1,
@@ -621,20 +628,85 @@ def test_schema_admission_rejects_runtime_rejected_unsorted_identifiers(
         verify_schemas.validate_schema_instance(schema_name, invalid, schemas)
 
 
-def test_schema_admission_rejects_noncontiguous_checkpoint_criteria() -> None:
+def _semantic_checkpoint_payload() -> dict[str, Any]:
+    record_ids = tuple(
+        RecordId("sha256:" + component * 64) for component in "123456789abc"
+    )
+    criteria = (
+        build_criterion(ordinal=0, digest=digest_bytes(b"criterion-a")),
+        build_criterion(ordinal=1, digest=digest_bytes(b"criterion-b")),
+    )
+    work = (
+        build_work_item(
+            kind="implement",
+            status_code="pending",
+            digest=digest_bytes(b"work-a"),
+        ),
+        build_work_item(
+            kind="verify",
+            status_code="pending",
+            digest=digest_bytes(b"work-b"),
+        ),
+    )
+    unresolved = (
+        build_unresolved_item(code="question-a", digest=digest_bytes(b"answer-a")),
+        build_unresolved_item(code="question-b", digest=digest_bytes(b"answer-b")),
+    )
+    scopes = (
+        PathScopeV1(path=None, kind=PathScopeKind.TREE),
+        PathScopeV1(
+            path=PathIdentityV1.from_bytes("posix-bytes", b"owned/file"),
+            kind=PathScopeKind.FILE,
+        ),
+    )
+    ordered_scopes = tuple(
+        sorted(scopes, key=lambda scope: canonical_bytes(path_scope_payload(scope)))
+    )
+    checkpoint = build_checkpoint(
+        parent_checkpoint_id=None,
+        target_id=record_ids[0],
+        goal_id=record_ids[1],
+        acceptance_criteria=criteria,
+        constraint_digests=(record_ids[2], record_ids[3]),
+        instruction_id=record_ids[4],
+        policy_id=record_ids[5],
+        ruleset_id=record_ids[6],
+        actor_ids=(record_ids[0], record_ids[1]),
+        evidence_ids=(record_ids[2], record_ids[3]),
+        invalidation_ids=(record_ids[4], record_ids[5]),
+        accepted_decision_ids=(record_ids[6], record_ids[7]),
+        pending_work=tuple(sorted(work, key=lambda item: item.work_item_id)),
+        unresolved=tuple(sorted(unresolved, key=lambda item: item.unresolved_id)),
+        assignment_authority=AssignmentAuthority.READ_ONLY,
+        authority_scopes=ordered_scopes,
+        open_assignment_ids=(record_ids[8], record_ids[9]),
+        audit_parent_id=None,
+        initialization_intent_id=record_ids[10],
+        created_at=LogicalTime("2026-08-14T12:00:00Z"),
+    )
+    return checkpoint_payload(checkpoint)
+
+
+_CHECKPOINT_ORDERED_ID_FIELDS = (
+    "constraint_digests",
+    "actor_ids",
+    "evidence_ids",
+    "invalidation_ids",
+    "accepted_decision_ids",
+    "open_assignment_ids",
+)
+
+
+@pytest.mark.parametrize("field", _CHECKPOINT_ORDERED_ID_FIELDS)
+def test_checkpoint_schema_admission_rejects_unsorted_identifier_fields(
+    field: str,
+) -> None:
     schemas = _schema_documents()
-    invalid = verify_schemas.schema_goldens()["checkpoint.schema.json"]
-    invalid = {
-        **invalid,
-        "acceptance_criteria": [
-            invalid["acceptance_criteria"][0],
-            {
-                **invalid["acceptance_criteria"][0],
-                "criterion_id": "sha256:" + "2" * 64,
-                "ordinal": 2,
-            },
-        ],
-    }
+    invalid = copy.deepcopy(_semantic_checkpoint_payload())
+    invalid[field].reverse()
+    verify_schemas.schema_validator("checkpoint.schema.json", schemas).validate(
+        invalid
+    )
 
     with pytest.raises(verify_schemas.SchemaVerificationError):
         verify_schemas.validate_schema_instance(
@@ -643,44 +715,95 @@ def test_schema_admission_rejects_noncontiguous_checkpoint_criteria() -> None:
             schemas,
         )
 
-    digest = digest_bytes(b"criterion parity")
-    contiguous = build_criterion(ordinal=0, digest=digest)
-    skipped = build_criterion(ordinal=2, digest=digest)
-    scope = PathScopeV1(path=None, kind=PathScopeKind.TREE)
-    arguments = {
-        "parent_checkpoint_id": None,
-        "target_id": RecordId(digest),
-        "goal_id": RecordId(digest),
-        "constraint_digests": (),
-        "instruction_id": RecordId(digest),
-        "policy_id": RecordId(digest),
-        "ruleset_id": RecordId(digest),
-        "actor_ids": (RecordId(digest),),
-        "evidence_ids": (),
-        "invalidation_ids": (),
-        "accepted_decision_ids": (),
-        "pending_work": (),
-        "unresolved": (),
-        "assignment_authority": AssignmentAuthority.READ_ONLY,
-        "authority_scopes": (scope,),
-        "open_assignment_ids": (),
-        "audit_parent_id": None,
-        "initialization_intent_id": RecordId(digest),
-        "created_at": LogicalTime("2026-08-14T12:00:00Z"),
-    }
-    with pytest.raises(CanonicalJSONError):
-        build_checkpoint(
-            acceptance_criteria=(contiguous, skipped),
-            **arguments,
+
+@pytest.mark.parametrize("field", _CHECKPOINT_ORDERED_ID_FIELDS)
+def test_checkpoint_schema_admission_rejects_duplicate_identifier_fields(
+    field: str,
+) -> None:
+    schemas = _schema_documents()
+    invalid = copy.deepcopy(_semantic_checkpoint_payload())
+    invalid[field][1] = invalid[field][0]
+
+    with pytest.raises(ValidationError):
+        verify_schemas.validate_schema_instance(
+            "checkpoint.schema.json",
+            invalid,
+            schemas,
         )
-    runtime_valid = build_checkpoint(
-        acceptance_criteria=(contiguous,),
-        **arguments,
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "criteria_noncontiguous",
+        "criteria_duplicate_identity",
+        "criterion_forged_identity",
+        "work_unsorted",
+        "work_duplicate_identity",
+        "work_forged_identity",
+        "unresolved_unsorted",
+        "unresolved_duplicate_identity",
+        "unresolved_forged_identity",
+        "authority_scopes_unsorted",
+        "authority_scope_invalid_identity",
+    ],
+)
+def test_checkpoint_schema_admission_rejects_runtime_semantic_mismatch(
+    case: str,
+) -> None:
+    schemas = _schema_documents()
+    invalid = copy.deepcopy(_semantic_checkpoint_payload())
+    forged = "sha256:" + "f" * 64
+    if case == "criteria_noncontiguous":
+        invalid["acceptance_criteria"][1]["ordinal"] = 2
+    elif case == "criteria_duplicate_identity":
+        invalid["acceptance_criteria"][1]["criterion_id"] = invalid[
+            "acceptance_criteria"
+        ][0]["criterion_id"]
+    elif case == "criterion_forged_identity":
+        invalid["acceptance_criteria"][0]["criterion_id"] = forged
+    elif case == "work_unsorted":
+        invalid["pending_work"].reverse()
+    elif case == "work_duplicate_identity":
+        invalid["pending_work"][1]["work_item_id"] = invalid["pending_work"][0][
+            "work_item_id"
+        ]
+    elif case == "work_forged_identity":
+        invalid["pending_work"][0]["work_item_id"] = forged
+    elif case == "unresolved_unsorted":
+        invalid["unresolved"].reverse()
+    elif case == "unresolved_duplicate_identity":
+        invalid["unresolved"][1]["unresolved_id"] = invalid["unresolved"][0][
+            "unresolved_id"
+        ]
+    elif case == "unresolved_forged_identity":
+        invalid["unresolved"][0]["unresolved_id"] = forged
+    elif case == "authority_scopes_unsorted":
+        invalid["authority_scopes"].reverse()
+    elif case == "authority_scope_invalid_identity":
+        scope = next(
+            item for item in invalid["authority_scopes"] if item["path"] is not None
+        )
+        scope["path"]["segment_offsets"] = [1]
+    else:  # pragma: no cover - parametrization is closed above
+        raise AssertionError(case)
+    verify_schemas.schema_validator("checkpoint.schema.json", schemas).validate(
+        invalid
     )
+
+    with pytest.raises(verify_schemas.SchemaVerificationError):
+        verify_schemas.validate_schema_instance(
+            "checkpoint.schema.json",
+            invalid,
+            schemas,
+        )
+
+
+def test_checkpoint_schema_admission_accepts_runtime_valid_payload() -> None:
     verify_schemas.validate_schema_instance(
         "checkpoint.schema.json",
-        checkpoint_payload(runtime_valid),
-        schemas,
+        _semantic_checkpoint_payload(),
+        _schema_documents(),
     )
 
 

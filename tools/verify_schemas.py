@@ -11,8 +11,35 @@ from typing import Any
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from referencing import Registry, Resource
 
-from agent_continuity.kernel.canonical import canonical_bytes, validate_logical_time
-from agent_continuity.kernel.records import SCHEMA_REGISTRY
+from agent_continuity.kernel.canonical import (
+    CanonicalJSONError,
+    canonical_bytes,
+    validate_logical_time,
+)
+from agent_continuity.kernel.model import (
+    AssignmentAuthority,
+    Digest,
+    LogicalTime,
+    RecordId,
+)
+from agent_continuity.kernel.paths import (
+    PathIdentityV1,
+    PathScopeV1,
+    parse_path_encoding,
+    parse_path_scope_kind,
+)
+from agent_continuity.kernel.records import (
+    SCHEMA_REGISTRY,
+    CriterionV1,
+    ProducerIdentity,
+    UnresolvedItemV1,
+    WorkItemV1,
+    build_actor,
+    build_checkpoint,
+    build_criterion,
+    build_ruleset,
+    criterion_payload,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_ROOT = ROOT / "schemas" / "v1"
@@ -75,6 +102,87 @@ def _registered_schemas(schemas: dict[str, dict[str, Any]]) -> dict[str, str]:
     return registered
 
 
+def _record_ids(values: list[str]) -> tuple[RecordId, ...]:
+    return tuple(RecordId(value) for value in values)
+
+
+def _optional_record_id(value: str | None) -> RecordId | None:
+    return None if value is None else RecordId(value)
+
+
+def _path_scope_from_payload(instance: dict[str, Any]) -> PathScopeV1:
+    path_payload = instance["path"]
+    path = None
+    if path_payload is not None:
+        path = PathIdentityV1(
+            encoding=parse_path_encoding(path_payload["encoding"]),
+            raw_b64=path_payload["raw_b64"],
+            segment_offsets=tuple(path_payload["segment_offsets"]),
+            case_key_b64=path_payload["case_key_b64"],
+        )
+    return PathScopeV1(
+        path=path,
+        kind=parse_path_scope_kind(instance["kind"]),
+    )
+
+
+def validate_checkpoint_runtime_payload(instance: dict[str, Any]) -> None:
+    """Reconstruct Checkpoint/v1 through public models for semantic admission."""
+
+    criteria = tuple(
+        CriterionV1(
+            criterion_id=RecordId(item["criterion_id"]),
+            ordinal=item["ordinal"],
+            digest=Digest(item["digest"]),
+        )
+        for item in instance["acceptance_criteria"]
+    )
+    pending_work = tuple(
+        WorkItemV1(
+            work_item_id=RecordId(item["work_item_id"]),
+            kind=item["kind"],
+            status_code=item["status_code"],
+            digest=Digest(item["digest"]),
+        )
+        for item in instance["pending_work"]
+    )
+    unresolved = tuple(
+        UnresolvedItemV1(
+            unresolved_id=RecordId(item["unresolved_id"]),
+            code=item["code"],
+            digest=None if item["digest"] is None else Digest(item["digest"]),
+        )
+        for item in instance["unresolved"]
+    )
+    checkpoint = build_checkpoint(
+        parent_checkpoint_id=_optional_record_id(instance["parent_checkpoint_id"]),
+        target_id=RecordId(instance["target_id"]),
+        goal_id=RecordId(instance["goal_id"]),
+        acceptance_criteria=criteria,
+        constraint_digests=tuple(
+            Digest(value) for value in instance["constraint_digests"]
+        ),
+        instruction_id=RecordId(instance["instruction_id"]),
+        policy_id=RecordId(instance["policy_id"]),
+        ruleset_id=RecordId(instance["ruleset_id"]),
+        actor_ids=_record_ids(instance["actor_ids"]),
+        evidence_ids=_record_ids(instance["evidence_ids"]),
+        invalidation_ids=_record_ids(instance["invalidation_ids"]),
+        accepted_decision_ids=_record_ids(instance["accepted_decision_ids"]),
+        pending_work=pending_work,
+        unresolved=unresolved,
+        assignment_authority=AssignmentAuthority(instance["assignment_authority"]),
+        authority_scopes=tuple(
+            _path_scope_from_payload(item) for item in instance["authority_scopes"]
+        ),
+        open_assignment_ids=_record_ids(instance["open_assignment_ids"]),
+        audit_parent_id=_optional_record_id(instance["audit_parent_id"]),
+        initialization_intent_id=RecordId(instance["initialization_intent_id"]),
+        created_at=LogicalTime(instance["created_at"]),
+    )
+    checkpoint.record()
+
+
 def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
     if (
         name == "capability-claim.schema.json"
@@ -85,23 +193,24 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         is None
     ):
         raise SchemaVerificationError("invalid_golden")
-    if name == "actor.schema.json":
-        scope_ids = instance.get("scope_ids")
-        if isinstance(scope_ids, list) and scope_ids != sorted(scope_ids):
-            raise SchemaVerificationError("invalid_instance")
-    if name == "ruleset.schema.json":
-        rule_ids = instance.get("rule_ids")
-        if isinstance(rule_ids, list) and rule_ids != sorted(rule_ids):
-            raise SchemaVerificationError("invalid_instance")
-    if name == "checkpoint.schema.json":
-        criteria = instance.get("acceptance_criteria")
-        if isinstance(criteria, list):
-            ordinals = [
-                item.get("ordinal") if isinstance(item, dict) else None
-                for item in criteria
-            ]
-            if ordinals != list(range(len(criteria))):
-                raise SchemaVerificationError("invalid_instance")
+    try:
+        if name == "actor.schema.json":
+            producer = instance["producer"]
+            build_actor(
+                producer=ProducerIdentity(
+                    producer["name"],
+                    producer["version"],
+                    Digest(producer["digest"]),
+                ),
+                authority=AssignmentAuthority(instance["authority"]),
+                scope_ids=_record_ids(instance["scope_ids"]),
+            )
+        elif name == "ruleset.schema.json":
+            build_ruleset(_record_ids(instance["rule_ids"]))
+        elif name == "checkpoint.schema.json":
+            validate_checkpoint_runtime_payload(instance)
+    except (CanonicalJSONError, KeyError, TypeError, ValueError) as error:
+        raise SchemaVerificationError("invalid_instance") from error
 
 
 def schema_validator(
@@ -137,6 +246,7 @@ def validate_schema_instance(
 
 def schema_goldens() -> dict[str, dict[str, Any]]:
     digest = "sha256:" + "1" * 64
+    criterion = build_criterion(ordinal=0, digest=Digest(digest))
     capability = {
         "adapter_id": "acg-git",
         "adapter_version": "1",
@@ -208,9 +318,7 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "verdict": "pass",
         },
         "checkpoint.schema.json": {
-            "acceptance_criteria": [
-                {"criterion_id": digest, "digest": digest, "ordinal": 0}
-            ],
+            "acceptance_criteria": [criterion_payload(criterion)],
             "accepted_decision_ids": [],
             "actor_ids": [digest],
             "assignment_authority": "read_only",
