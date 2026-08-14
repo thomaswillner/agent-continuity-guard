@@ -1,0 +1,14 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/work-item.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "kind": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"},
+    "status_code": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"}
+  },
+  "required": ["digest", "kind", "status_code"],
+  "title": "WorkItem/v1",
+  "type": "object",
+  "x-record-type": "WorkItem/v1"
+}

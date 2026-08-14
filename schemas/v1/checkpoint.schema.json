@@ -1,0 +1,59 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/checkpoint.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "nullableDigest": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "criterion": {
+      "additionalProperties": false,
+      "properties": {"criterion_id": {"$ref": "#/$defs/digest"}, "digest": {"$ref": "#/$defs/digest"}, "ordinal": {"minimum": 0, "type": "integer"}},
+      "required": ["criterion_id", "digest", "ordinal"],
+      "type": "object"
+    },
+    "workItem": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {"$ref": "#/$defs/digest"},
+        "kind": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"},
+        "status_code": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"},
+        "work_item_id": {"$ref": "#/$defs/digest"}
+      },
+      "required": ["digest", "kind", "status_code", "work_item_id"],
+      "type": "object"
+    },
+    "unresolvedItem": {
+      "additionalProperties": false,
+      "properties": {"code": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"}, "digest": {"$ref": "#/$defs/nullableDigest"}, "unresolved_id": {"$ref": "#/$defs/digest"}},
+      "required": ["code", "digest", "unresolved_id"],
+      "type": "object"
+    },
+    "logicalTime": {"pattern": "^(?:(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01]))|(?:(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30))|(?:02-(?:0[1-9]|1[0-9]|2[0-8])))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$", "type": "string"}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "acceptance_criteria": {"items": {"$ref": "#/$defs/criterion"}, "type": "array"},
+    "accepted_decision_ids": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "actor_ids": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "assignment_authority": {"enum": ["read_only", "scoped_write"]},
+    "audit_parent_id": {"$ref": "#/$defs/nullableDigest"},
+    "authority_scopes": {"items": {"$ref": "https://agent-continuity-guard.dev/schemas/v1/path-scope.schema.json"}, "type": "array", "uniqueItems": true},
+    "constraint_digests": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "created_at": {"$ref": "#/$defs/logicalTime"},
+    "evidence_ids": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "goal_id": {"$ref": "#/$defs/digest"},
+    "initialization_intent_id": {"$ref": "#/$defs/digest"},
+    "instruction_id": {"$ref": "#/$defs/digest"},
+    "invalidation_ids": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "open_assignment_ids": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "parent_checkpoint_id": {"$ref": "#/$defs/nullableDigest"},
+    "pending_work": {"items": {"$ref": "#/$defs/workItem"}, "type": "array", "uniqueItems": true},
+    "policy_id": {"$ref": "#/$defs/digest"},
+    "ruleset_id": {"$ref": "#/$defs/digest"},
+    "target_id": {"$ref": "#/$defs/digest"},
+    "unresolved": {"items": {"$ref": "#/$defs/unresolvedItem"}, "type": "array", "uniqueItems": true}
+  },
+  "required": ["acceptance_criteria", "accepted_decision_ids", "actor_ids", "assignment_authority", "audit_parent_id", "authority_scopes", "constraint_digests", "created_at", "evidence_ids", "goal_id", "initialization_intent_id", "instruction_id", "invalidation_ids", "open_assignment_ids", "parent_checkpoint_id", "pending_work", "policy_id", "ruleset_id", "target_id", "unresolved"],
+  "title": "Checkpoint/v1",
+  "type": "object",
+  "x-record-type": "Checkpoint/v1"
+}

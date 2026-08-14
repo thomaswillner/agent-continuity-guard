@@ -1,0 +1,18 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/checkpoint-receipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {"digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}},
+  "additionalProperties": false,
+  "properties": {
+    "audit_event_id": {"$ref": "#/$defs/digest"},
+    "audit_sequence": {"minimum": 1, "type": "integer"},
+    "checkpoint_id": {"$ref": "#/$defs/digest"},
+    "target_id": {"$ref": "#/$defs/digest"},
+    "transition_allowed": {"type": "boolean"},
+    "verdict": {"enum": ["pass", "warn", "unknown", "block"]}
+  },
+  "required": ["audit_event_id", "audit_sequence", "checkpoint_id", "target_id", "transition_allowed", "verdict"],
+  "title": "CheckpointReceipt/v1",
+  "type": "object",
+  "x-record-type": "CheckpointReceipt/v1"
+}

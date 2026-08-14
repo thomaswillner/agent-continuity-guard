@@ -1,0 +1,13 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/criterion.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "ordinal": {"minimum": 0, "type": "integer"}
+  },
+  "required": ["digest", "ordinal"],
+  "title": "Criterion/v1",
+  "type": "object",
+  "x-record-type": "Criterion/v1"
+}

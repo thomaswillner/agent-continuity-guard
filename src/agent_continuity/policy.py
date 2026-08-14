@@ -13,6 +13,7 @@ from typing import Final, TypeVar
 
 from agent_continuity.kernel.canonical import (
     CanonicalJSONError,
+    canonical_bytes,
     digest_bytes,
     record_id,
 )
@@ -499,6 +500,77 @@ def load_policy(*, target: Path, explicit: Path | None) -> LoadedPolicy:
     return LoadedPolicy(
         compiled=compiled,
         source=source,
+        source_digest=compiled.authoring_digest,
+    )
+
+
+def apply_facade_overrides(
+    loaded: LoadedPolicy,
+    *,
+    profile: Profile | None,
+    promotion_mode: PromotionMode | None,
+) -> LoadedPolicy:
+    """Validate and recompile explicit facade overrides into Policy/v1 identity."""
+
+    if type(loaded) is not LoadedPolicy:
+        raise PolicyRequestError("loaded policy is invalid")
+    if profile is not None and type(profile) is not Profile:
+        raise PolicyRequestError("facade profile override is invalid")
+    if promotion_mode is not None and type(promotion_mode) is not PromotionMode:
+        raise PolicyRequestError("facade promotion override is invalid")
+    if profile is None and promotion_mode is None:
+        return loaded
+
+    selected_profile = loaded.compiled.profile if profile is None else profile
+    selected_promotion = (
+        loaded.compiled.promotion_mode
+        if promotion_mode is None
+        else promotion_mode
+    )
+    authoring_digest = digest_bytes(
+        canonical_bytes(
+            {
+                "base_policy_id": loaded.compiled.policy_id,
+                "profile": None if profile is None else profile.value,
+                "promotion_mode": (
+                    None if promotion_mode is None else promotion_mode.value
+                ),
+                "schema": "PolicyFacadeOverride/v1",
+            }
+        )
+    )
+    base = loaded.compiled
+    placeholder = CompiledPolicyV1(
+        policy_id=RecordId("sha256:" + "0" * 64),
+        authoring_digest=authoring_digest,
+        profile=selected_profile,
+        promotion_mode=selected_promotion,
+        limits=base.limits,
+        required_adapter_capabilities=base.required_adapter_capabilities,
+        max_assignment_authority=base.max_assignment_authority,
+        approval_operator_ids=base.approval_operator_ids,
+        rollback_operator_ids=base.rollback_operator_ids,
+        evidence_expiry_seconds=base.evidence_expiry_seconds,
+        enabled_detectors=base.enabled_detectors,
+        severity_by_code=base.severity_by_code,
+    )
+    compiled = CompiledPolicyV1(
+        policy_id=record_id("Policy", "v1", policy_payload(placeholder)),
+        authoring_digest=authoring_digest,
+        profile=selected_profile,
+        promotion_mode=selected_promotion,
+        limits=base.limits,
+        required_adapter_capabilities=base.required_adapter_capabilities,
+        max_assignment_authority=base.max_assignment_authority,
+        approval_operator_ids=base.approval_operator_ids,
+        rollback_operator_ids=base.rollback_operator_ids,
+        evidence_expiry_seconds=base.evidence_expiry_seconds,
+        enabled_detectors=base.enabled_detectors,
+        severity_by_code=base.severity_by_code,
+    )
+    return LoadedPolicy(
+        compiled=compiled,
+        source=f"{loaded.source}+facade",
         source_digest=compiled.authoring_digest,
     )
 

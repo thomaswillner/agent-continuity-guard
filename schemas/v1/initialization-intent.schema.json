@@ -1,0 +1,19 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/initialization-intent.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {"digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}},
+  "additionalProperties": false,
+  "properties": {
+    "criterion_ids": {"items": {"$ref": "#/$defs/digest"}, "type": "array", "uniqueItems": true},
+    "goal_id": {"$ref": "#/$defs/digest"},
+    "instruction_id": {"$ref": "#/$defs/digest"},
+    "policy_id": {"$ref": "#/$defs/digest"},
+    "ruleset_id": {"$ref": "#/$defs/digest"},
+    "session_key": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"},
+    "target_id": {"$ref": "#/$defs/digest"}
+  },
+  "required": ["criterion_ids", "goal_id", "instruction_id", "policy_id", "ruleset_id", "session_key", "target_id"],
+  "title": "InitializationIntent/v1",
+  "type": "object",
+  "x-record-type": "InitializationIntent/v1"
+}

@@ -1,0 +1,10 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/goal.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {"digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}},
+  "required": ["digest"],
+  "title": "Goal/v1",
+  "type": "object",
+  "x-record-type": "Goal/v1"
+}

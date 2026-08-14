@@ -1,0 +1,14 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/actor.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority": {"enum": ["read_only", "scoped_write"]},
+    "producer": {"$ref": "https://agent-continuity-guard.dev/schemas/v1/producer-identity.schema.json"},
+    "scope_ids": {"items": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}, "type": "array", "uniqueItems": true}
+  },
+  "required": ["authority", "producer", "scope_ids"],
+  "title": "Actor/v1",
+  "type": "object",
+  "x-record-type": "Actor/v1"
+}

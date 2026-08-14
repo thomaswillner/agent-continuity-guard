@@ -140,6 +140,15 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
         "segment_offsets": [0],
     }
     return {
+        "actor.schema.json": {
+            "authority": "read_only",
+            "producer": {
+                "digest": digest,
+                "name": "agent-continuity-guard",
+                "version": "0.1.0.dev0",
+            },
+            "scope_ids": [digest],
+        },
         "audit-anchor.schema.json": {
             "audit_head_id": digest,
             "audit_sequence": 1,
@@ -173,6 +182,39 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "valid": True,
         },
         "capability-claim.schema.json": capability,
+        "checkpoint-receipt.schema.json": {
+            "audit_event_id": digest,
+            "audit_sequence": 1,
+            "checkpoint_id": digest,
+            "target_id": digest,
+            "transition_allowed": True,
+            "verdict": "pass",
+        },
+        "checkpoint.schema.json": {
+            "acceptance_criteria": [
+                {"criterion_id": digest, "digest": digest, "ordinal": 0}
+            ],
+            "accepted_decision_ids": [],
+            "actor_ids": [digest],
+            "assignment_authority": "read_only",
+            "audit_parent_id": None,
+            "authority_scopes": [{"kind": "tree", "path": None}],
+            "constraint_digests": [],
+            "created_at": "2026-08-09T12:00:00Z",
+            "evidence_ids": [],
+            "goal_id": digest,
+            "initialization_intent_id": digest,
+            "instruction_id": digest,
+            "invalidation_ids": [],
+            "open_assignment_ids": [],
+            "parent_checkpoint_id": None,
+            "pending_work": [],
+            "policy_id": digest,
+            "ruleset_id": digest,
+            "target_id": digest,
+            "unresolved": [],
+        },
+        "criterion.schema.json": {"digest": digest, "ordinal": 0},
         "evaluation-result.schema.json": {
             "findings": [],
             "schema": "EvaluationResult/v1",
@@ -192,6 +234,15 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "files": [
                 {"blob_oid": "a" * 40, "byte_digest": digest, "path": path}
             ]
+        },
+        "initialization-intent.schema.json": {
+            "criterion_ids": [digest],
+            "goal_id": digest,
+            "instruction_id": digest,
+            "policy_id": digest,
+            "ruleset_id": digest,
+            "session_key": "default",
+            "target_id": digest,
         },
         "path-identity.schema.json": {
             "case_key_b64": None,
@@ -227,11 +278,13 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "schema": "PolicyTemplate/v1",
             "toml_lines": ["version = 1"],
         },
+        "goal.schema.json": {"digest": digest},
         "producer-identity.schema.json": {
             "digest": digest,
             "name": "acg-git",
             "version": "1.0",
         },
+        "ruleset.schema.json": {"rule_ids": []},
         "target-identity.schema.json": {
             "adapter_id": "acg-git",
             "adapter_version": "1",
@@ -248,6 +301,12 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "status_digest": digest,
             "tree_oid": "b" * 40,
             "worktree_manifest_digest": digest,
+        },
+        "unresolved-item.schema.json": {"code": "unknown", "digest": None},
+        "work-item.schema.json": {
+            "digest": digest,
+            "kind": "task",
+            "status_code": "pending",
         },
     }
 

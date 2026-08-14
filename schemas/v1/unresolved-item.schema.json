@@ -1,0 +1,13 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/unresolved-item.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {"maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$", "type": "string"},
+    "digest": {"oneOf": [{"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}, {"type": "null"}]}
+  },
+  "required": ["code", "digest"],
+  "title": "UnresolvedItem/v1",
+  "type": "object",
+  "x-record-type": "UnresolvedItem/v1"
+}
