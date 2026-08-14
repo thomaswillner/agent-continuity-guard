@@ -309,48 +309,167 @@ def test_verify_reports_compiled_policy_drift_without_store_write(
     assert _projection(database) == before
 
 
-def test_kernel_checkpoint_standard_import_loads_no_io_capable_modules() -> None:
+_KERNEL_PURE_STDLIB_ROOTS = frozenset(
+    {
+        "__future__",
+        "base64",
+        "collections",
+        "dataclasses",
+        "datetime",
+        "enum",
+        "hashlib",
+        "json",
+        "re",
+        "typing",
+        "unicodedata",
+    }
+)
+
+_KERNEL_RUNTIME_FORBIDDEN = (
+    "ctypes",
+    "ftplib",
+    "glob",
+    "http",
+    "locale",
+    "multiprocessing",
+    "pathlib",
+    "platform",
+    "random",
+    "resource",
+    "secrets",
+    "selectors",
+    "shutil",
+    "signal",
+    "socket",
+    "socketserver",
+    "sqlite3",
+    "ssl",
+    "subprocess",
+    "sysconfig",
+    "tempfile",
+    "threading",
+    "urllib",
+)
+
+
+def _kernel_module_identity(path: Path, source_root: Path) -> tuple[str, bool]:
+    relative = path.relative_to(source_root)
+    if relative.suffix != ".py":
+        raise AssertionError("kernel source must be Python")
+    parts = list(relative.with_suffix("").parts)
+    is_package = parts[-1] == "__init__"
+    if is_package:
+        parts.pop()
+    return ".".join(parts), is_package
+
+
+def _canonical_import_modules(
+    node: ast.Import | ast.ImportFrom,
+    *,
+    module_name: str,
+    is_package: bool,
+) -> tuple[str, ...]:
+    if isinstance(node, ast.Import):
+        return tuple(alias.name for alias in node.names)
+    if node.level == 0:
+        return () if node.module is None else (node.module,)
+
+    package_parts = module_name.split(".")
+    if not is_package:
+        package_parts.pop()
+    if node.level > len(package_parts):
+        return (f"<invalid-relative:{node.level}>",)
+    base = package_parts[: len(package_parts) - node.level + 1]
+    if node.module is not None:
+        return (".".join((*base, *node.module.split("."))),)
+    if any(alias.name == "*" for alias in node.names):
+        return (".".join(base),)
+    return tuple(".".join((*base, alias.name)) for alias in node.names)
+
+
+def _kernel_source_violations(
+    sources: tuple[tuple[Path, str], ...],
+    *,
+    source_root: Path,
+) -> list[str]:
+    violations: list[str] = []
+    for path, source in sources:
+        module_name, is_package = _kernel_module_identity(path, source_root)
+        tree = ast.parse(source, filename=os.fspath(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                imported = _canonical_import_modules(
+                    node,
+                    module_name=module_name,
+                    is_package=is_package,
+                )
+            else:
+                imported = ()
+            for name in imported:
+                project_dependency = name == "agent_continuity" or name.startswith(
+                    "agent_continuity."
+                )
+                kernel_dependency = (
+                    name == "agent_continuity.kernel"
+                    or name.startswith("agent_continuity.kernel.")
+                )
+                external_root = name.partition(".")[0]
+                if (project_dependency and not kernel_dependency) or (
+                    not project_dependency
+                    and external_root not in _KERNEL_PURE_STDLIB_ROOTS
+                ):
+                    violations.append(f"{path.name}:{node.lineno}:{name}")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"__import__", "eval", "exec", "open"}
+            ):
+                violations.append(f"{path.name}:{node.lineno}:{node.func.id}()")
+    return violations
+
+
+def test_every_public_kernel_module_standard_import_loads_no_io_helpers() -> None:
     source_root = Path(__file__).parents[2] / "src"
-    forbidden = (
-        "agent_continuity.api",
-        "agent_continuity.adapters",
-        "agent_continuity.capture",
-        "agent_continuity.store",
-        "ftplib",
-        "glob",
-        "http",
-        "pathlib",
-        "shutil",
-        "socket",
-        "sqlite3",
-        "ssl",
-        "subprocess",
-        "tempfile",
-        "urllib",
+    kernel_root = source_root / "agent_continuity" / "kernel"
+    public_sources = tuple(
+        path
+        for path in sorted(kernel_root.rglob("*.py"))
+        if path.name == "__init__.py" or not path.name.startswith("_")
     )
-    script = (
-        "import sys\n"
-        f"sys.path.insert(0, {os.fspath(source_root)!r})\n"
-        "import agent_continuity.kernel.checkpoint\n"
-        f"forbidden = {forbidden!r}\n"
-        "loaded = sorted(name for name in sys.modules "
-        "if any(name == item or name.startswith(item + '.') "
-        "for item in forbidden))\n"
-        "print('\\n'.join(loaded))\n"
-        "raise SystemExit(bool(loaded))\n"
+    module_names = tuple(
+        _kernel_module_identity(path, source_root)[0] for path in public_sources
     )
+    assert module_names
+    assert len(module_names) == len(set(module_names))
 
-    result = subprocess.run(
-        [sys.executable, "-S", "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    for module_name in module_names:
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {os.fspath(source_root)!r})\n"
+            f"__import__({module_name!r})\n"
+            f"forbidden = {_KERNEL_RUNTIME_FORBIDDEN!r}\n"
+            "project = [name for name in sys.modules "
+            "if name.startswith('agent_continuity.') "
+            "and name != 'agent_continuity.kernel' "
+            "and not name.startswith('agent_continuity.kernel.')]\n"
+            "helpers = [name for name in sys.modules "
+            "if any(name == item or name.startswith(item + '.') "
+            "for item in forbidden)]\n"
+            "loaded = sorted(set(project).union(helpers))\n"
+            "print('\\n'.join(loaded))\n"
+            "raise SystemExit(bool(loaded))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
-    assert result.returncode == 0, result.stdout
-    assert result.stderr == ""
-    assert result.stdout == "\n"
+        assert result.returncode == 0, f"{module_name}: {result.stdout}"
+        assert result.stderr == ""
+        assert result.stdout == "\n"
 
     baseline = subprocess.run(
         [
@@ -373,52 +492,57 @@ def test_kernel_checkpoint_standard_import_loads_no_io_capable_modules() -> None
     assert baseline.stdout == "os\nos.path\n"
 
 
-def test_kernel_source_import_graph_has_no_io_capability_edges() -> None:
-    kernel_root = Path(__file__).parents[2] / "src" / "agent_continuity" / "kernel"
-    forbidden = (
-        "agent_continuity.adapters",
-        "agent_continuity.capture",
-        "agent_continuity.store",
-        "ftplib",
-        "glob",
-        "http",
-        "importlib",
-        "os",
-        "pathlib",
-        "random",
-        "secrets",
-        "shutil",
-        "socket",
-        "sqlite3",
-        "ssl",
-        "subprocess",
-        "tempfile",
-        "time",
-        "urllib",
-    )
-    violations: list[str] = []
-    for path in sorted(kernel_root.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=os.fspath(path))
-        for node in ast.walk(tree):
-            imported: tuple[str, ...] = ()
-            if isinstance(node, ast.Import):
-                imported = tuple(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0:
-                imported = () if node.module is None else (node.module,)
-            for name in imported:
-                if any(
-                    name == item or name.startswith(item + ".")
-                    for item in forbidden
-                ):
-                    violations.append(f"{path.name}:{node.lineno}:{name}")
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in {"__import__", "eval", "exec", "open"}
-            ):
-                violations.append(f"{path.name}:{node.lineno}:{node.func.id}()")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "from ..capture import CaptureSnapshot\n",
+            "synthetic.py:1:agent_continuity.capture",
+        ),
+        (
+            "from ..adapters import Clock\n",
+            "synthetic.py:1:agent_continuity.adapters",
+        ),
+        (
+            "from ..store import SQLiteStateStore\n",
+            "synthetic.py:1:agent_continuity.store",
+        ),
+        (
+            "from agent_continuity.api import Continuity\n",
+            "synthetic.py:1:agent_continuity.api",
+        ),
+        (
+            "import agent_continuity.api\n",
+            "synthetic.py:1:agent_continuity.api",
+        ),
+        (
+            "import fractions\n",
+            "synthetic.py:1:fractions",
+        ),
+    ],
+)
+def test_kernel_source_analyzer_rejects_dependency_outside_kernel(
+    source: str,
+    expected: str,
+) -> None:
+    source_root = Path("src")
+    path = Path("src/agent_continuity/kernel/synthetic.py")
 
-    assert violations == []
+    assert _kernel_source_violations(
+        ((path, source),), source_root=source_root
+    ) == [expected]
+
+
+def test_kernel_source_import_graph_has_no_io_capability_edges() -> None:
+    source_root = Path(__file__).parents[2] / "src"
+    kernel_root = source_root / "agent_continuity" / "kernel"
+    sources = tuple(
+        (path, path.read_text(encoding="utf-8"))
+        for path in sorted(kernel_root.rglob("*.py"))
+    )
+    assert sources
+
+    assert _kernel_source_violations(sources, source_root=source_root) == []
 
 
 def test_lazy_root_exports_preserve_public_identity_and_behavior() -> None:
