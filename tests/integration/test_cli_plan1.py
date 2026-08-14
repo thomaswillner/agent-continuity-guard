@@ -45,9 +45,16 @@ def _arguments(target: Path, state_home: Path) -> tuple[str, ...]:
     )
 
 
+def _lexical_var_alias(path: Path) -> Path:
+    raw = os.fspath(path)
+    if raw.startswith("/private/var/"):
+        return Path(raw.removeprefix("/private"))
+    return path
+
+
 def test_plan1_cli_commands_preserve_target_and_pure_verify(tmp_path: Path) -> None:
     target = make_git_repo(tmp_path).root
-    state_home = tmp_path / "external-state"
+    state_home = _lexical_var_alias(tmp_path / "external-state")
     before_target = repository_write_manifest(target)
     common = _arguments(target, state_home)
 
@@ -94,6 +101,18 @@ def test_plan1_cli_commands_preserve_target_and_pure_verify(tmp_path: Path) -> N
     assert stat.S_IMODE(anchor_output.stat().st_mode) == 0o600
     assert not anchor_output.is_relative_to(target)
     assert not anchor_output.is_relative_to(state_home)
+
+    for forbidden_output in (target / "blocked.json", state_home / "blocked.json"):
+        refused_export = _command(
+            "audit-anchor",
+            "export",
+            *common,
+            "--output",
+            os.fspath(forbidden_output),
+        )
+        assert refused_export.returncode == 2
+        assert refused_export.stderr == b""
+        assert _payload(refused_export)["schema"] == "Error/v1"
 
     audit = _command("verify-audit", *common, "--anchor", os.fspath(anchor_output))
     assert audit.returncode == 0

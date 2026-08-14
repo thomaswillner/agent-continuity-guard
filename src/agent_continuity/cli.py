@@ -152,9 +152,10 @@ def _safe_anchor_output(
         if not parent.is_dir():
             raise OSError("anchor parent is invalid")
         resolved = parent / candidate.name
-        protected: tuple[Path, ...] = (target, state_home)
+        protected_roots: tuple[Path, ...] = (target, state_home)
         if git_directory is not None:
-            protected += (git_directory,)
+            protected_roots += (git_directory,)
+        protected = tuple(root.resolve(strict=True) for root in protected_roots)
         if any(resolved.is_relative_to(root) for root in protected):
             raise CLIRequestError("anchor output overlaps protected state")
         assert_external_state(target, git_directory, state_home)
