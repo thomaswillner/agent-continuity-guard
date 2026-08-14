@@ -23,6 +23,40 @@ class AssignmentAuthority(StrEnum):
     SCOPED_WRITE = "scoped_write"
 
 
+class PromotionMode(StrEnum):
+    """Operator policy for deterministic candidate promotion."""
+
+    AUTOMATIC = "automatic"
+    REVIEW = "review"
+    DISABLED = "disabled"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceLimitsV1:
+    """Identity-bearing resource limits compiled from policy authoring."""
+
+    max_paths: int
+    max_file_bytes: int
+    max_aggregate_bytes: int
+    max_analyzer_text_bytes: int
+    max_external_json_bytes: int
+
+    def __post_init__(self) -> None:
+        values = (
+            self.max_paths,
+            self.max_file_bytes,
+            self.max_aggregate_bytes,
+            self.max_analyzer_text_bytes,
+            self.max_external_json_bytes,
+        )
+        if any(type(value) is not int or value < 1 for value in values):
+            raise ValueError("resource limits must be positive exact integers")
+        if self.max_analyzer_text_bytes > self.max_file_bytes:
+            raise ValueError("analyzer limit cannot exceed file limit")
+        if self.max_file_bytes > self.max_aggregate_bytes:
+            raise ValueError("file limit cannot exceed aggregate limit")
+
+
 @dataclass(frozen=True, slots=True)
 class StoredRecord:
     """Canonical bytes and identity for one immutable record."""

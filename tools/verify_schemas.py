@@ -200,6 +200,33 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "segment_offsets": [0],
         },
         "path-scope.schema.json": {"kind": "tree", "path": None},
+        "policy.schema.json": {
+            "approval_operator_ids": [],
+            "authoring_digest": digest,
+            "enabled_detectors": ["capture.unstable", "target.dirty"],
+            "evidence_expiry_seconds": 3600,
+            "limits": {
+                "max_aggregate_bytes": 21_474_836_480,
+                "max_analyzer_text_bytes": 4_194_304,
+                "max_external_json_bytes": 8_388_608,
+                "max_file_bytes": 1_073_741_824,
+                "max_paths": 250_000,
+            },
+            "max_assignment_authority": "read_only",
+            "profile": "guard",
+            "promotion_mode": "automatic",
+            "required_adapter_capabilities": [],
+            "rollback_operator_ids": [],
+            "severity_by_code": {
+                "capture.unstable": "block",
+                "target.dirty": "block",
+            },
+        },
+        "policy-template.schema.json": {
+            "authoring_digest": digest,
+            "schema": "PolicyTemplate/v1",
+            "toml_lines": ["version = 1"],
+        },
         "producer-identity.schema.json": {
             "digest": digest,
             "name": "acg-git",

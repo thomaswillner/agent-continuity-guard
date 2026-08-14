@@ -1,0 +1,19 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/policy-template.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authoring_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "schema": {"const": "PolicyTemplate/v1"},
+    "toml_lines": {
+      "items": {"pattern": "^[^\\u0000-\\u001f]*$", "type": "string"},
+      "maxItems": 256,
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": ["authoring_digest", "schema", "toml_lines"],
+  "title": "PolicyTemplate/v1",
+  "type": "object",
+  "x-record-type": "PolicyTemplate/v1"
+}

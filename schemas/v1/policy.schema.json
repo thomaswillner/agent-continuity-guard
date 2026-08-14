@@ -1,0 +1,94 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+    "identifier": {
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "approval_operator_ids": {
+      "items": {"$ref": "#/$defs/digest"},
+      "maxItems": 1024,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "authoring_digest": {"$ref": "#/$defs/digest"},
+    "enabled_detectors": {
+      "items": {"enum": ["capture.unstable", "target.dirty"]},
+      "maxItems": 2,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "evidence_expiry_seconds": {"minimum": 1, "type": "integer"},
+    "limits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_aggregate_bytes": {"maximum": 21474836480, "minimum": 1, "type": "integer"},
+        "max_analyzer_text_bytes": {"maximum": 4194304, "minimum": 1, "type": "integer"},
+        "max_external_json_bytes": {"maximum": 8388608, "minimum": 1, "type": "integer"},
+        "max_file_bytes": {"maximum": 1073741824, "minimum": 1, "type": "integer"},
+        "max_paths": {"maximum": 250000, "minimum": 1, "type": "integer"}
+      },
+      "required": [
+        "max_aggregate_bytes",
+        "max_analyzer_text_bytes",
+        "max_external_json_bytes",
+        "max_file_bytes",
+        "max_paths"
+      ],
+      "type": "object"
+    },
+    "max_assignment_authority": {"enum": ["read_only", "scoped_write"]},
+    "profile": {"enum": ["observe", "guard", "strict"]},
+    "promotion_mode": {"enum": ["automatic", "review", "disabled"]},
+    "required_adapter_capabilities": {
+      "items": {
+        "enum": [
+          "atomic_snapshot",
+          "descriptor_pinned_reads",
+          "git_immutable_objects",
+          "git_network_disabled",
+          "windows_reparse_protection"
+        ]
+      },
+      "maxItems": 5,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "rollback_operator_ids": {
+      "items": {"$ref": "#/$defs/digest"},
+      "maxItems": 1024,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "severity_by_code": {
+      "additionalProperties": false,
+      "properties": {
+        "capture.unstable": {"enum": ["warn", "block"]},
+        "target.dirty": {"enum": ["warn", "block"]}
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "approval_operator_ids",
+    "authoring_digest",
+    "enabled_detectors",
+    "evidence_expiry_seconds",
+    "limits",
+    "max_assignment_authority",
+    "profile",
+    "promotion_mode",
+    "required_adapter_capabilities",
+    "rollback_operator_ids",
+    "severity_by_code"
+  ],
+  "title": "Policy/v1",
+  "type": "object",
+  "x-record-type": "Policy/v1"
+}

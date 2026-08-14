@@ -1,0 +1,17 @@
+version = 1
+profile = "guard"
+promotion_mode = "automatic"
+max_assignment_authority = "read_only"
+approval_operator_ids = []
+rollback_operator_ids = []
+required_adapter_capabilities = []
+evidence_expiry_seconds = 3600
+enabled_detectors = ["capture.unstable", "target.dirty"]
+severity_by_code = {"capture.unstable" = "block", "target.dirty" = "block"}
+
+[limits]
+max_paths = 250000
+max_file_bytes = 1073741824
+max_aggregate_bytes = 21474836480
+max_analyzer_text_bytes = 4194304
+max_external_json_bytes = 8388608
