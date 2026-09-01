@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 41,
+  "revision": 42,
   "contract": {
     "revision": 3,
     "goal": {
@@ -120,7 +120,9 @@
       "Plan 1 final-review remediation commit a50245f497691427c396c13736d4e8c4aa4b3953 closes policy/snapshot binding, original target-path admission, and read-only SQLite verification gaps. Maker report sha256:b73e795c6ed9f15e30964ea363f021d3f0e0fbd8213463584af91f12afa755d5 records genuine baseline RED 10 failed/1 passed, focused GREEN 11/11, full 560/560, strict mypy over 26 source files, Ruff, 25 schemas, wheel/sdist build, installed-wheel and target-read-only cases, exact eight-path scope, and DCO sign-off.",
       "Independent Task 1 review sha256:75dc9108c76c46324675506c54dde567a9c1d784f14acf0a9f69bb0c28fde993 statically verified all three prior whole-Plan-1 code findings but held acceptance UNKNOWN for missing raw DCO and named installed-wheel receipts. Evidence-only fix sha256:8949395780c9973730fac50d75100307be8585c74cde51f4bb22475d52425768 binds the exact commit body/DCO and a focused installed-wheel canary with 1 passed in 13.18 seconds at unchanged clean HEAD. Scoped re-review sha256:dd49964536215eae88cbc7f79bfeb43d4fb2c4f7eaa942d75331479b041f8d7b reports the finding ADDRESSED with no new Critical or Important breakage. Two exceptional-path cleanup inferences remain Minor and deferred to final review.",
       "Plan 2 Task 1 stable live capture is complete at commits dea9a865f62aed1036e143044dccf266b64eda50 and 67d426bd5c58aaa6b1217c8dbaecb6f48e358d24. Final maker report sha256:d26dd1677195a3aeb771d029e0cc7301d2465945dbe54f360f35aed3e211e889 records genuine fix RED 14 failed/15 passed, focused GREEN 29/29, full 591/591, strict mypy over 30 source files, Ruff, 25 schemas, wheel/sdist build, installed-wheel 1/1, exact-manifest 4/4, exact owned paths, and DCO sign-off.",
-      "Independent Task 2 review sha256:692e2060528d47342020a85a71ec81d362578e86d292d04bab6c9fe11db5ee3d found four Important gaps in tracked-worktree inventory, Git command admission, ephemeral error sanitization, and mutation-sensitive target equality. Fix package sha256:12350ec2be63833a23c956a6c7c46f7208cd3633dd6cc098f2b6cf3995549fba and scoped re-review sha256:a27a50dbf1a9e962191bf1aa48d0a6ed4b8d75ea88edc5c3eede1cb74d676591 close all four with no new Critical or Important breakage. One undecodable POSIX path fixture is Minor and deferred to final review."
+      "Independent Task 2 review sha256:692e2060528d47342020a85a71ec81d362578e86d292d04bab6c9fe11db5ee3d found four Important gaps in tracked-worktree inventory, Git command admission, ephemeral error sanitization, and mutation-sensitive target equality. Fix package sha256:12350ec2be63833a23c956a6c7c46f7208cd3633dd6cc098f2b6cf3995549fba and scoped re-review sha256:a27a50dbf1a9e962191bf1aa48d0a6ed4b8d75ea88edc5c3eede1cb74d676591 close all four with no new Critical or Important breakage. One undecodable POSIX path fixture is Minor and deferred to final review.",
+      "Plan 2 Task 2 strict Citation/v1 and Evidence/v1 contracts are complete at commits 4df0a692db6a6d4fbb74364bc081a0f2d20e5b39 and 002df32a482b0d0b13b52d59d715664c5ce5a622. Final maker report sha256:551220b572ae415f1c6930fce4b48c01980aa803e396d0c4f2a5144b1820413f records genuine fix RED 2 failed/9 passed for bounded Citation spans and 2 failed/12 passed for Evidence proof/null semantics, followed by 25 focused and 616 full tests, 27 schemas, strict mypy over 32 source files, Ruff, build, clean-wheel nullable round trip, exact owned paths, and DCO sign-off.",
+      "Independent Task 3 review sha256:a1158c7cd35dfa3d30bc619a1c004b5a38e34897efa807a2bda0929bf55b9b9a found three Important gaps: nullable digests mutated during decode, Citation spans could exceed supplied bytes, and production Evidence construction injected fixture-like deterministic proof defaults. Fix package sha256:70d7546019dabeb6e3b627c47b186499ecc828e3c249a2d853cfdad618e69792 and scoped re-review sha256:a31e561075d637c5ede8dadebcd4ffcf2ab77a59a6a790b93fc4930551cb2da9 close all three with no new Critical or Important breakage. One direct-payload-construction Minor is deferred to final review."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -157,7 +159,8 @@
       "Project-local coordination learning: the first broad GLM challenge exceeded its 900-second ceiling and left a redundant read-only wrapper process; a bounded fixed-evidence CLIProxy rerun produced the admitted verdict, and the stale process was terminated without repository mutation. Collaboration payload delivery to the intended model-specific reviewer was unavailable, so the explicit CLIProxy wrapper was used with provider and model pinned. Future model challenges must use one bounded fixed-evidence prompt, one finite deadline, and process cleanup verification.",
       "Closed the three-finding Plan 1 remediation without consuming another implementation-plan task. The first full-suite run caught retained exception context; one minimal api.py repair changed the fingerprint, and the required full rerun passed 560/560. Independent review then caught an evidence-packaging gap; one evidence-only fix and scoped re-review closed it without source, index, HEAD, or package mutation.",
       "Closed Plan 2 Task 1 only after independent review separated index membership from present tracked-worktree bytes, replaced a generic subprocess seam with fixed Git command admission, normalized ephemeral filesystem failures to UNKNOWN, and made target manifests detect same-byte identity replacement. These proof boundaries are reusable for later resume and no-target-write gates.",
-      "Task 2 coordination caught an unauthorized capture root-export change before commit and admitted only two justified fix-test paths. One maker plus immutable package plus fresh checker preserved source ownership while the ledger and loop state retained progress across long waits."
+      "Task 2 coordination caught an unauthorized capture root-export change before commit and admitted only two justified fix-test paths. One maker plus immutable package plus fresh checker preserved source ownership while the ledger and loop state retained progress across long waits.",
+      "Closed Plan 2 Task 2 only after independent review forced absence to remain explicit: nullable digests round-trip as null, Citation factories reject out-of-bounds spans, and production Evidence construction requires caller-supplied proof-bearing values. Fixture convenience remains in tests and verifier inputs rather than authority-bearing runtime constructors."
     ]
   },
   "gates": [
@@ -215,7 +218,7 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 10,
+      "implementation_plan_tasks": 11,
       "task4_fix_rounds": 5,
       "task4_post_breaker_attempts": 1,
       "task4_post_breaker_reviews": 1,
@@ -225,11 +228,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "evidence_resume_lineage.task2.citation_evidence_contracts",
-    "symptom": "Plan 2 Task 2 strict Citation/v1 and Evidence/v1 records, schemas, canonical identities, authority/completeness rules, invalidators, and golden bytes remain unimplemented.",
-    "evidence_signature": "docs/plans/2026-08-08-02-evidence-resume-lineage.md:130-312 plus docs/superpowers/plans/2026-09-01-safe-simple-completion.md overlay Task 3 Step 1",
-    "hypothesis": "Public-kernel contract tests can establish strict Citation and Evidence RED before minimal frozen record, schema, registry, validation, and golden-byte changes while preserving kernel purity, zero runtime dependencies, and UNKNOWN for incomplete proof."
+    "gate": "evidence_resume_lineage.task3.direct_transitive_invalidation",
+    "symptom": "Plan 2 Task 3 direct and transitive Evidence invalidation, negative controls, graph propagation, cycle handling, normalized Findings integration, and planted mutation proof remain unimplemented.",
+    "evidence_signature": "docs/plans/2026-08-08-02-evidence-resume-lineage.md:313-438 plus docs/superpowers/plans/2026-09-01-safe-simple-completion.md overlay Task 3 Step 2",
+    "hypothesis": "Pure-kernel contract and property tests can establish direct, transitive, unavailable, cycle, and negative-control RED before one bounded deterministic graph evaluator and Findings integration, while preserving UNKNOWN precedence, canonical ordering, kernel purity, and zero runtime dependencies."
   },
-  "next_action": "Commit revision-41 Plan 2 Task 1 acceptance state, then generate one composite brief for overlay Task 3 Step 1 plus detailed Plan 2 Task 2 and dispatch exactly one fresh TDD maker for Citation/v1 and Evidence/v1 contracts; no concurrent maker.",
+  "next_action": "Commit revision-42 Plan 2 Task 2 acceptance state, then generate one composite brief for overlay Task 3 Step 2 plus detailed Plan 2 Task 3 and dispatch exactly one fresh TDD maker for direct and transitive Evidence invalidation; no concurrent maker.",
   "verdict": "IN_PROGRESS"
 }
