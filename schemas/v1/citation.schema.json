@@ -1,0 +1,35 @@
+{
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/citation.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}
+  },
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "byte_end": {"type": "null"},
+        "byte_start": {"type": "null"},
+        "span_digest": {"type": "null"}
+      }
+    },
+    {
+      "properties": {
+        "byte_end": {"minimum": 0, "type": "integer"},
+        "byte_start": {"minimum": 0, "type": "integer"},
+        "span_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  ],
+  "properties": {
+    "byte_end": {},
+    "byte_start": {},
+    "file_digest": {"$ref": "#/$defs/digest"},
+    "path": {"$ref": "https://agent-continuity-guard.dev/schemas/v1/path-identity.schema.json"},
+    "span_digest": {}
+  },
+  "required": ["byte_end", "byte_start", "file_digest", "path", "span_digest"],
+  "title": "Citation/v1",
+  "type": "object",
+  "x-record-type": "Citation/v1"
+}

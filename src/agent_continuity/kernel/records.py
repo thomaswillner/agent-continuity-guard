@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .canonical import (
     CanonicalJSONError,
     canonical_bytes,
+    canonical_loads,
     record_id,
     validate_logical_time,
 )
@@ -39,6 +40,8 @@ SCHEMA_REGISTRY: dict[str, str] = {
     "CapabilityClaim/v1": "capability-claim.schema.json",
     "Checkpoint/v1": "checkpoint.schema.json",
     "CheckpointReceipt/v1": "checkpoint-receipt.schema.json",
+    "Citation/v1": "citation.schema.json",
+    "Evidence/v1": "evidence.schema.json",
     "Criterion/v1": "criterion.schema.json",
     "Error/v1": "error.schema.json",
     "EvaluationResult/v1": "evaluation-result.schema.json",
@@ -58,6 +61,10 @@ SCHEMA_REGISTRY: dict[str, str] = {
     "VerificationResult/v1": "verification-result.schema.json",
     "WorkItem/v1": "work-item.schema.json",
 }
+
+
+class RecordSchemaError(CanonicalJSONError):
+    """A stored record does not satisfy its strict schema contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +177,7 @@ def _require_ordered_model_ids(value: tuple[RecordId, ...], *, field: str) -> No
 
 
 def require_digest(value: str) -> None:
-    if _DIGEST_RE.fullmatch(value) is None:
+    if type(value) is not str or _DIGEST_RE.fullmatch(value) is None:
         raise CanonicalJSONError("digest must be lowercase SHA-256")
 
 
@@ -496,6 +503,59 @@ def make_record(
         schema_version=schema_version,
         canonical_bytes=encoded,
     )
+
+
+def encode_record(value: object) -> StoredRecord:
+    """Encode one supported strict kernel record with derived identity."""
+
+    from .citation import CitationV1
+    from .evidence import EvidenceV1
+
+    if type(value) is CitationV1:
+        return value.record()
+    if type(value) is EvidenceV1:
+        return value.record()
+    raise RecordSchemaError("record value is unsupported")
+
+
+def decode_record(value: StoredRecord) -> object:
+    """Decode and revalidate one supported strict kernel record."""
+
+    if type(value) is not StoredRecord:
+        raise RecordSchemaError("stored record is invalid")
+    if type(value.record_type) is not str:
+        raise RecordSchemaError("record type is invalid")
+    if type(value.schema_version) is not str:
+        raise RecordSchemaError("schema version is invalid")
+    if type(value.canonical_bytes) is not bytes:
+        raise RecordSchemaError("canonical bytes are invalid")
+    try:
+        require_digest(value.record_id)
+        payload = canonical_loads(value.canonical_bytes)
+    except CanonicalJSONError as error:
+        raise RecordSchemaError("stored record is invalid") from error
+
+    if value.schema_version != "v1":
+        raise RecordSchemaError("schema version is unsupported")
+
+    if value.record_type == "Citation":
+        from .citation import citation_from_payload
+
+        decoded_citation = citation_from_payload(payload)
+        expected = encode_record(decoded_citation)
+        if expected != value:
+            raise RecordSchemaError("stored record identity is invalid")
+        return decoded_citation
+    elif value.record_type == "Evidence":
+        from .evidence import evidence_from_payload
+
+        decoded_evidence = evidence_from_payload(payload)
+        expected = encode_record(decoded_evidence)
+        if expected != value:
+            raise RecordSchemaError("stored record identity is invalid")
+        return decoded_evidence
+    else:
+        raise RecordSchemaError("record type is unsupported")
 
 
 def producer_identity_payload(producer: ProducerIdentity) -> JsonObject:

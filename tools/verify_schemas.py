@@ -17,7 +17,17 @@ from agent_continuity.kernel.canonical import (
     validate_logical_time,
 )
 from agent_continuity.kernel.checkpoint import verification_result_payload
+from agent_continuity.kernel.citation import (
+    citation_from_payload,
+    citation_payload,
+    citation_v1,
+)
 from agent_continuity.kernel.evaluation import EvaluationResult, Verdict
+from agent_continuity.kernel.evidence import (
+    evidence_from_payload,
+    evidence_payload,
+    evidence_v1,
+)
 from agent_continuity.kernel.findings import Finding
 from agent_continuity.kernel.model import (
     AssignmentAuthority,
@@ -213,6 +223,10 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
             build_ruleset(_record_ids(instance["rule_ids"]))
         elif name == "checkpoint.schema.json":
             validate_checkpoint_runtime_payload(instance)
+        elif name == "citation.schema.json":
+            citation_from_payload(instance)
+        elif name == "evidence.schema.json":
+            evidence_from_payload(instance)
         elif name == "verification-result.schema.json":
             findings = tuple(
                 Finding(
@@ -297,6 +311,8 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
         "raw_b64": "QUdFTlRTLm1k",
         "segment_offsets": [0],
     }
+    citation = citation_v1(b"docs/guide.md", b"whole")
+    evidence = evidence_v1()
     return {
         "actor.schema.json": {
             "authority": "read_only",
@@ -370,6 +386,8 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "target_id": digest,
             "unresolved": [],
         },
+        "citation.schema.json": citation_payload(citation),
+        "evidence.schema.json": evidence_payload(evidence),
         "criterion.schema.json": {"digest": digest, "ordinal": 0},
         "error.schema.json": {
             "category": "request",
