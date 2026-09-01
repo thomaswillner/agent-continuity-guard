@@ -39,7 +39,9 @@ def test_span_citation_requires_complete_bounds_and_digest() -> None:
             CitationV1(path, file_digest, byte_start, byte_end, span_digest)
 
 
-@pytest.mark.parametrize("byte_start, byte_end", [(-1, 1), (4, 4), (9, 4)])
+@pytest.mark.parametrize(
+    "byte_start, byte_end", [(-1, 1), (4, 4), (9, 4), (0, 6), (6, 7)]
+)
 def test_span_citation_rejects_negative_equal_and_reversed_offsets(
     byte_start: int, byte_end: int
 ) -> None:

@@ -78,7 +78,7 @@ def citation_v1(
     if byte_start is not None or byte_end is not None:
         if type(byte_start) is not int or type(byte_end) is not int:
             raise RecordSchemaError("citation byte range is invalid")
-        if byte_start < 0 or byte_start >= byte_end:
+        if byte_start < 0 or byte_start >= byte_end or byte_end > len(file_bytes):
             raise RecordSchemaError("citation byte range is invalid")
         span_digest = digest_bytes(file_bytes[byte_start:byte_end])
     return CitationV1(

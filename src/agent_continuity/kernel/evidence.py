@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import cast
 
-from .canonical import (
-    canonical_bytes,
-    digest_bytes,
-    record_id,
-    validate_logical_time,
-)
+from .canonical import canonical_bytes, record_id, validate_logical_time
 from .model import (
     Digest,
     JsonObject,
@@ -29,8 +24,6 @@ from .records import (
     make_record,
     require_digest,
 )
-
-_DEFAULT_OBSERVED_AT = LogicalTime("2026-09-01T00:00:00Z")
 
 
 class EvidenceAuthority(StrEnum):
@@ -244,92 +237,97 @@ def fact_payload(value: FactV1) -> JsonObject:
 
 def evidence_payload(evidence: EvidenceV1) -> JsonObject:
     _validate_evidence_content(evidence)
+    return _evidence_payload_fields(
+        kind=evidence.kind,
+        subject_digest=evidence.subject_digest,
+        authority=evidence.authority,
+        producer=evidence.producer,
+        target_id=evidence.target_id,
+        checkpoint_id=evidence.checkpoint_id,
+        observed_at=evidence.observed_at,
+        expires_at=evidence.expires_at,
+        completeness=evidence.completeness,
+        terminal_status=evidence.terminal_status,
+        declared_output_digest=evidence.declared_output_digest,
+        observed_output_digest=evidence.observed_output_digest,
+        collected_check_count=evidence.collected_check_count,
+        pagination_complete=evidence.pagination_complete,
+        payload_digest=evidence.payload_digest,
+        facts=evidence.facts,
+        invalidators=evidence.invalidators,
+    )
+
+
+def _evidence_payload_fields(
+    *,
+    kind: EvidenceKind,
+    subject_digest: Digest,
+    authority: EvidenceAuthority,
+    producer: ProducerIdentity,
+    target_id: RecordId,
+    checkpoint_id: RecordId,
+    observed_at: LogicalTime,
+    expires_at: LogicalTime | None,
+    completeness: EvidenceCompleteness,
+    terminal_status: int | None,
+    declared_output_digest: Digest | None,
+    observed_output_digest: Digest | None,
+    collected_check_count: int | None,
+    pagination_complete: bool | None,
+    payload_digest: Digest,
+    facts: tuple[FactV1, ...],
+    invalidators: tuple[InvalidatorV1, ...],
+) -> JsonObject:
     return {
-        "authority": evidence.authority.value,
-        "checkpoint_id": evidence.checkpoint_id,
-        "collected_check_count": evidence.collected_check_count,
-        "completeness": evidence.completeness.value,
-        "declared_output_digest": evidence.declared_output_digest,
-        "expires_at": evidence.expires_at,
-        "facts": [fact_payload(fact) for fact in evidence.facts],
+        "authority": authority.value,
+        "checkpoint_id": checkpoint_id,
+        "collected_check_count": collected_check_count,
+        "completeness": completeness.value,
+        "declared_output_digest": declared_output_digest,
+        "expires_at": expires_at,
+        "facts": [fact_payload(fact) for fact in facts],
         "invalidators": [
-            invalidator_payload(invalidator) for invalidator in evidence.invalidators
+            invalidator_payload(invalidator) for invalidator in invalidators
         ],
-        "kind": evidence.kind.value,
-        "observed_at": evidence.observed_at,
-        "observed_output_digest": evidence.observed_output_digest,
-        "pagination_complete": evidence.pagination_complete,
-        "payload_digest": evidence.payload_digest,
+        "kind": kind.value,
+        "observed_at": observed_at,
+        "observed_output_digest": observed_output_digest,
+        "pagination_complete": pagination_complete,
+        "payload_digest": payload_digest,
         "producer": {
-            "digest": evidence.producer.digest,
-            "name": evidence.producer.name,
-            "version": evidence.producer.version,
+            "digest": producer.digest,
+            "name": producer.name,
+            "version": producer.version,
         },
-        "subject_digest": evidence.subject_digest,
-        "target_id": evidence.target_id,
-        "terminal_status": evidence.terminal_status,
+        "subject_digest": subject_digest,
+        "target_id": target_id,
+        "terminal_status": terminal_status,
     }
 
 
 def evidence_v1(
     *,
-    kind: EvidenceKind = EvidenceKind.COMMAND,
-    subject_digest: Digest | None = None,
-    authority: EvidenceAuthority = EvidenceAuthority.DETERMINISTIC,
-    producer: ProducerIdentity | None = None,
-    target_id: RecordId | None = None,
-    checkpoint_id: RecordId | None = None,
-    observed_at: LogicalTime = _DEFAULT_OBSERVED_AT,
-    expires_at: LogicalTime | None = None,
-    completeness: EvidenceCompleteness = EvidenceCompleteness.COMPLETE,
-    terminal_status: int | None = 0,
-    declared_output_digest: Digest | None = None,
-    observed_output_digest: Digest | None = None,
-    collected_check_count: int | None = 1,
-    pagination_complete: bool | None = True,
-    payload_digest: Digest | None = None,
-    facts: tuple[FactV1, ...] | None = None,
-    invalidators: tuple[InvalidatorV1, ...] | None = None,
+    kind: EvidenceKind,
+    subject_digest: Digest,
+    authority: EvidenceAuthority,
+    producer: ProducerIdentity,
+    target_id: RecordId,
+    checkpoint_id: RecordId,
+    observed_at: LogicalTime,
+    expires_at: LogicalTime | None,
+    completeness: EvidenceCompleteness,
+    terminal_status: int | None,
+    declared_output_digest: Digest | None,
+    observed_output_digest: Digest | None,
+    collected_check_count: int | None,
+    pagination_complete: bool | None,
+    payload_digest: Digest,
+    facts: tuple[FactV1, ...],
+    invalidators: tuple[InvalidatorV1, ...],
 ) -> EvidenceV1:
-    """Build a complete canonical Evidence/v1 value with derived identity."""
+    """Build proof-bearing Evidence/v1 with a derived canonical identity."""
 
-    subject_digest = (
-        digest_bytes(b"subject") if subject_digest is None else subject_digest
-    )
-    producer = (
-        ProducerIdentity("acg-test", "1", digest_bytes(b"producer"))
-        if producer is None
-        else producer
-    )
-    target_id = RecordId(digest_bytes(b"target")) if target_id is None else target_id
-    checkpoint_id = (
-        RecordId(digest_bytes(b"checkpoint"))
-        if checkpoint_id is None
-        else checkpoint_id
-    )
-    declared_output_digest = (
-        digest_bytes(b"stdout")
-        if declared_output_digest is None
-        else declared_output_digest
-    )
-    observed_output_digest = (
-        digest_bytes(b"stdout")
-        if observed_output_digest is None
-        else observed_output_digest
-    )
-    payload_digest = (
-        digest_bytes(b"payload") if payload_digest is None else payload_digest
-    )
-    resolved_facts = (FactV1(("target", "clean"), True),) if facts is None else facts
-    resolved_invalidators = (
-        (
-            InvalidatorV1(
-                InvalidatorKind.CITATION, RecordId(digest_bytes(b"citation")), True
-            ),
-        )
-        if invalidators is None else invalidators
-    )
-    payload = _payload_from_fields(
+    payload = _evidence_payload_fields(
         kind=kind,
         subject_digest=subject_digest,
         authority=authority,
@@ -345,8 +343,8 @@ def evidence_v1(
         collected_check_count=collected_check_count,
         pagination_complete=pagination_complete,
         payload_digest=payload_digest,
-        facts=resolved_facts,
-        invalidators=resolved_invalidators,
+        facts=facts,
+        invalidators=invalidators,
     )
     identity = record_id("Evidence", "v1", payload)
     return EvidenceV1(
@@ -366,17 +364,9 @@ def evidence_v1(
         collected_check_count,
         pagination_complete,
         payload_digest,
-        resolved_facts,
-        resolved_invalidators,
+        facts,
+        invalidators,
     )
-
-
-def _payload_from_fields(**fields: object) -> JsonObject:
-    placeholder = object.__new__(EvidenceV1)
-    for field, value in fields.items():
-        object.__setattr__(placeholder, field, value)
-    object.__setattr__(placeholder, "evidence_id", RecordId("sha256:" + "0" * 64))
-    return evidence_payload(placeholder)
 
 
 def evidence_from_payload(payload: JsonObject) -> EvidenceV1:

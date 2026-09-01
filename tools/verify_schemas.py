@@ -24,6 +24,11 @@ from agent_continuity.kernel.citation import (
 )
 from agent_continuity.kernel.evaluation import EvaluationResult, Verdict
 from agent_continuity.kernel.evidence import (
+    EvidenceAuthority,
+    EvidenceCompleteness,
+    EvidenceKind,
+    InvalidatorKind,
+    InvalidatorV1,
     evidence_from_payload,
     evidence_payload,
     evidence_v1,
@@ -44,6 +49,7 @@ from agent_continuity.kernel.paths import (
 from agent_continuity.kernel.records import (
     SCHEMA_REGISTRY,
     CriterionV1,
+    FactV1,
     ProducerIdentity,
     UnresolvedItemV1,
     WorkItemV1,
@@ -226,7 +232,9 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         elif name == "citation.schema.json":
             citation_from_payload(instance)
         elif name == "evidence.schema.json":
-            evidence_from_payload(instance)
+            evidence = evidence_from_payload(instance)
+            if evidence_payload(evidence) != instance:
+                raise SchemaVerificationError("invalid_instance")
         elif name == "verification-result.schema.json":
             findings = tuple(
                 Finding(
@@ -312,7 +320,27 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
         "segment_offsets": [0],
     }
     citation = citation_v1(b"docs/guide.md", b"whole")
-    evidence = evidence_v1()
+    evidence = evidence_v1(
+        kind=EvidenceKind.COMMAND,
+        subject_digest=Digest(digest),
+        authority=EvidenceAuthority.DETERMINISTIC,
+        producer=ProducerIdentity("acg-test", "1", Digest(digest)),
+        target_id=RecordId(digest),
+        checkpoint_id=RecordId(digest),
+        observed_at=LogicalTime("2026-08-09T12:00:00Z"),
+        expires_at=None,
+        completeness=EvidenceCompleteness.COMPLETE,
+        terminal_status=0,
+        declared_output_digest=Digest(digest),
+        observed_output_digest=Digest(digest),
+        collected_check_count=1,
+        pagination_complete=True,
+        payload_digest=Digest(digest),
+        facts=(FactV1(("target", "clean"), True),),
+        invalidators=(
+            InvalidatorV1(InvalidatorKind.CITATION, RecordId(digest), True),
+        ),
+    )
     return {
         "actor.schema.json": {
             "authority": "read_only",
