@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import shutil
+import tempfile
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Protocol, cast
+
 from agent_continuity.kernel.evaluation import (
     EvaluationCase,
     EvaluationResult,
@@ -11,9 +19,105 @@ from agent_continuity.kernel.evaluation import (
 )
 from agent_continuity.kernel.findings import Finding
 from agent_continuity.kernel.model import RecordId
+from agent_continuity.kernel.paths import PathIdentityV1
 from agent_continuity.kernel.records import CheckpointV1
 
-from .base import CaptureSnapshot
+from .base import (
+    CapturedView,
+    CaptureSnapshot,
+    CaptureUnknownError,
+    TargetAdapter,
+    _LiveCapture,
+)
+
+
+class _LiveTargetAdapter(Protocol):
+    def _capture_live(
+        self, required_paths: Sequence[PathIdentityV1]
+    ) -> _LiveCapture: ...
+
+
+class CaptureCoordinator:
+    """Promote one stable live observation after at most one retry."""
+
+    def __init__(self, adapter: TargetAdapter) -> None:
+        self._adapter = adapter
+
+    def capture_stable(
+        self,
+        required_paths: Sequence[PathIdentityV1] = (),
+    ) -> CapturedView:
+        required = tuple(required_paths)
+        live_method = getattr(self._adapter, "_capture_live", None)
+        if not callable(live_method):
+            self._adapter.capture(tuple(path.raw_bytes() for path in required))
+            raise CaptureUnknownError(
+                "target adapter cannot promote a stable live-worktree view"
+            )
+        live_adapter = cast(_LiveTargetAdapter, self._adapter)
+        for attempt in range(2):
+            try:
+                first = live_adapter._capture_live(required)
+                second = live_adapter._capture_live(required)
+            except CaptureUnknownError:
+                if attempt == 0:
+                    continue
+                raise
+            if first == second:
+                ephemeral = self._materialize(second)
+                return CapturedView(
+                    snapshot=second.snapshot,
+                    files=second.files,
+                    ephemeral_root=ephemeral,
+                )
+        raise CaptureUnknownError("target remained unstable after one retry")
+
+    def _materialize(self, captured: _LiveCapture) -> Path | None:
+        if not captured.required_contents:
+            return None
+        root = Path(tempfile.mkdtemp(prefix="acg-capture-"))
+        target_root = getattr(self._adapter, "root", None)
+        if isinstance(target_root, Path) and root.is_relative_to(target_root):
+            shutil.rmtree(root)
+            raise CaptureUnknownError("ephemeral capture root overlaps target")
+        root_fd = os.open(root, os.O_RDONLY)
+        try:
+            for path, content in captured.required_contents.items():
+                current = os.dup(root_fd)
+                components = path.raw_bytes().split(b"/")
+                try:
+                    for component in components[:-1]:
+                        with contextlib.suppress(FileExistsError):
+                            os.mkdir(component, 0o700, dir_fd=current)
+                        next_descriptor = os.open(
+                            component,
+                            os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY,
+                            dir_fd=current,
+                        )
+                        os.close(current)
+                        current = next_descriptor
+                    descriptor = os.open(
+                        components[-1],
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                        0o400,
+                        dir_fd=current,
+                    )
+                    try:
+                        offset = 0
+                        while offset < len(content):
+                            offset += os.write(descriptor, content[offset:])
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
+                finally:
+                    os.close(current)
+            os.fsync(root_fd)
+        except BaseException:
+            shutil.rmtree(root)
+            raise
+        finally:
+            os.close(root_fd)
+        return root
 
 
 def snapshot_findings(

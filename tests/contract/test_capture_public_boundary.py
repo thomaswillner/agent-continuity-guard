@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
+
+import agent_continuity.capture as capture
+from agent_continuity.capture import GitTargetAdapter
 
 TASK3_TESTS = (
     Path(__file__),
@@ -21,6 +25,14 @@ PUBLIC_CAPTURE_EXPORTS = frozenset(
         "target_identity_payload",
     }
 )
+PUBLIC_GIT_SIGNATURES = {
+    "GitTargetAdapter": "(target: 'str | os.PathLike[str]') -> 'None'",
+    "capture": "(self, instruction_paths: 'Sequence[bytes]') -> 'CaptureSnapshot'",
+    "read_target_policy": "(self) -> 'bytes | None'",
+    "close": "(self) -> 'None'",
+    "__enter__": "(self) -> 'GitTargetAdapter'",
+    "__exit__": "(self, *_args: 'object') -> 'None'",
+}
 
 
 def _source_tree(path: Path) -> ast.Module:
@@ -74,6 +86,25 @@ def _public_boundary_violations(path: Path) -> list[str]:
     return violations
 
 
+def _private_capture_import_violations(path: Path) -> list[str]:
+    violations: list[str] = []
+    for node in ast.walk(_source_tree(path)):
+        modules: tuple[str, ...] = ()
+        if isinstance(node, ast.Import):
+            modules = tuple(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            modules = (node.module or "",)
+        for module in modules:
+            if any(
+                component.startswith("_")
+                for component in module.split(".")[2:]
+            ) and module.startswith("agent_continuity.capture."):
+                violations.append(
+                    f"{path.name}:{node.lineno}: private capture module import"
+                )
+    return violations
+
+
 def _parametrize_size(decorator: ast.expr) -> int:
     if not isinstance(decorator, ast.Call) or len(decorator.args) < 2:
         return 1
@@ -110,6 +141,41 @@ def test_task3_tests_use_only_public_capture_boundary() -> None:
     ]
 
     assert violations == []
+
+
+def test_capture_exports_and_git_adapter_signatures_are_characterized() -> None:
+    assert frozenset(capture.__all__) == PUBLIC_CAPTURE_EXPORTS
+    assert len(capture.__all__) == len(PUBLIC_CAPTURE_EXPORTS)
+    assert {
+        "GitTargetAdapter": str(inspect.signature(GitTargetAdapter)),
+        "capture": str(inspect.signature(GitTargetAdapter.capture)),
+        "read_target_policy": str(
+            inspect.signature(GitTargetAdapter.read_target_policy)
+        ),
+        "close": str(inspect.signature(GitTargetAdapter.close)),
+        "__enter__": str(inspect.signature(GitTargetAdapter.__enter__)),
+        "__exit__": str(inspect.signature(GitTargetAdapter.__exit__)),
+    } == PUBLIC_GIT_SIGNATURES
+
+
+def test_integration_and_security_tests_do_not_import_private_capture_modules() -> None:
+    test_root = Path(__file__).parents[1]
+    checked = tuple(
+        sorted(
+            (
+                *test_root.joinpath("integration").glob("test_*.py"),
+                *test_root.joinpath("security").glob("test_*.py"),
+            ),
+            key=lambda path: path.name,
+        )
+    )
+
+    assert checked
+    assert [
+        violation
+        for path in checked
+        for violation in _private_capture_import_violations(path)
+    ] == []
 
 
 def test_task3_collected_case_inventory_does_not_regress() -> None:

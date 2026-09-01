@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from agent_continuity.kernel.canonical import (
@@ -149,6 +150,49 @@ class CaptureSnapshot:
         return make_record(
             "InstructionManifest", instruction_manifest_payload(self.instructions)
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FileObservation:
+    path: PathIdentityV1
+    object_type: str
+    mode: int
+    size: int
+    content_digest: Digest
+    file_identity: tuple[int, int, int, int, int]
+
+    def __post_init__(self) -> None:
+        if type(self.path) is not PathIdentityV1:
+            raise CanonicalJSONError("file observation path is invalid")
+        if self.object_type not in {"file", "symlink"}:
+            raise CanonicalJSONError("file observation object type is invalid")
+        if type(self.mode) is not int or self.mode < 0:
+            raise CanonicalJSONError("file observation mode is invalid")
+        if type(self.size) is not int or self.size < 0:
+            raise CanonicalJSONError("file observation size is invalid")
+        if type(self.content_digest) is not str:
+            raise CanonicalJSONError("file observation digest is invalid")
+        require_digest(self.content_digest)
+        if (
+            type(self.file_identity) is not tuple
+            or len(self.file_identity) != 5
+            or any(type(item) is not int for item in self.file_identity)
+        ):
+            raise CanonicalJSONError("file observation identity is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedView:
+    snapshot: CaptureSnapshot
+    files: Mapping[PathIdentityV1, FileObservation]
+    ephemeral_root: Path | None
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveCapture:
+    snapshot: CaptureSnapshot
+    files: Mapping[PathIdentityV1, FileObservation]
+    required_contents: Mapping[PathIdentityV1, bytes]
 
 
 class TargetAdapter(Protocol):
