@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 39,
+  "revision": 40,
   "contract": {
     "revision": 3,
     "goal": {
@@ -116,7 +116,9 @@
       "Foundation Task 9 is complete at immutable commit 90b94814ac8147bcf833947cd1693bdb852682c8. Maker report sha256:7f46d44f71627ac973744f46f1fbcc40ba63f97c51b5c6629d69bac3f5ab54e7 records signed commits a198cad and 90b94814, 12 focused and 549 full tests; re-review sha256:f495dcdb68e5c8ff7bb0b19bc0e36e00ce302c5706fe134b6bbc9282a4f5f7eb reports all findings addressed. Controller gate sha256:b709cbc76020b31fdb6042f35361eeeb96d58c2766e7851e39f9b58242fa7a55 passes 549 tests, strict mypy over 26 source files, Ruff, 25 schemas, wheel and sdist build/install, and zero runtime dependencies.",
       "Whole-Plan-1 final review sha256:ca2d86e44285aa82e49d616224977c00243a25439c5c788886292017feb6ac50 accepts Task 9 behavior but requires three Important remediations before Plan 1 acceptance: bind target-root policy to A/B/C snapshots, admit the original caller target path before symlink resolution, and use genuinely read-only SQLite access for verify/audit/anchor paths. The preserved worktree has five modified production files plus three untracked remediation tests; 11 focused tests pass, but no dirty-worktree full-suite claim is recorded.",
       "A bounded read-only GLM glm-5.2 challenge at sha256:b4fa318c650a19a33768615d64849cce9b31a83ce5b138fa6e6c8e60e8333dd1 returned ACCEPT_WITH_CHANGES. Controller reconciliation accepted stale Task 9 accounting, Context Task 5 dependency inversion, Superpowers commit/review conflict, and delayed first-touch StateStore/Continuity extraction; no evidence contradicted MIT/public-safe, zero-dependency, no-Kimi/OpenClaw/provider, guarded-target read-only, external-SQLite, deterministic-automatic-promotion, human-non-override, or no-publication boundaries. The local CLIProxy route exposed requested model ID glm-5.2 only; a GLM 5.3 served alias remains unsupported or unknown.",
-      "Loop-engineering strict routing reports no contract gaps: root primary plan-execute-replan with maker-checker wrapper; the currently admitted Plan 1 remediation slice routes to TDD with maker-checker. Tree of Thoughts, monitor/retry, META optimization, multi-agent debate, concurrent makers, and mechanical runtime enforcement are rejected for this slice."
+      "Loop-engineering strict routing reports no contract gaps: root primary plan-execute-replan with maker-checker wrapper; the currently admitted Plan 1 remediation slice routes to TDD with maker-checker. Tree of Thoughts, monitor/retry, META optimization, multi-agent debate, concurrent makers, and mechanical runtime enforcement are rejected for this slice.",
+      "Plan 1 final-review remediation commit a50245f497691427c396c13736d4e8c4aa4b3953 closes policy/snapshot binding, original target-path admission, and read-only SQLite verification gaps. Maker report sha256:b73e795c6ed9f15e30964ea363f021d3f0e0fbd8213463584af91f12afa755d5 records genuine baseline RED 10 failed/1 passed, focused GREEN 11/11, full 560/560, strict mypy over 26 source files, Ruff, 25 schemas, wheel/sdist build, installed-wheel and target-read-only cases, exact eight-path scope, and DCO sign-off.",
+      "Independent Task 1 review sha256:75dc9108c76c46324675506c54dde567a9c1d784f14acf0a9f69bb0c28fde993 statically verified all three prior whole-Plan-1 code findings but held acceptance UNKNOWN for missing raw DCO and named installed-wheel receipts. Evidence-only fix sha256:8949395780c9973730fac50d75100307be8585c74cde51f4bb22475d52425768 binds the exact commit body/DCO and a focused installed-wheel canary with 1 passed in 13.18 seconds at unchanged clean HEAD. Scoped re-review sha256:dd49964536215eae88cbc7f79bfeb43d4fb2c4f7eaa942d75331479b041f8d7b reports the finding ADDRESSED with no new Critical or Important breakage. Two exceptional-path cleanup inferences remain Minor and deferred to final review."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -150,7 +152,8 @@
       "The lost-in-the-middle implementation plan maps the approved containment contract into six dependency-ordered TDD tasks and 33 concrete steps; two Self-Refine passes removed placeholder admission values, interface drift, checker-metadata leakage, undeclared dependencies, mutable block models, ambiguous position measurement, and prerequisite ordering defects.",
       "Reconciled Task 9 as completed implementation task 9 of 38; retained its immutable evidence and replaced the stale rerun instruction with the three-finding Plan 1 final-review remediation fingerprint.",
       "Corrected the completion overlay before dispatch: maker commits precede immutable review packaging; checkers inspect packages and receipts without duplicating full maker suites; Context Tasks 1 through 4 now precede Context Task 5; Plan 2 Tasks 5 through 6 remain separate; StateStore/Continuity extraction occurs inside ResumeContext's first api.py/SQLite feature touch.",
-      "Project-local coordination learning: the first broad GLM challenge exceeded its 900-second ceiling and left a redundant read-only wrapper process; a bounded fixed-evidence CLIProxy rerun produced the admitted verdict, and the stale process was terminated without repository mutation. Collaboration payload delivery to the intended model-specific reviewer was unavailable, so the explicit CLIProxy wrapper was used with provider and model pinned. Future model challenges must use one bounded fixed-evidence prompt, one finite deadline, and process cleanup verification."
+      "Project-local coordination learning: the first broad GLM challenge exceeded its 900-second ceiling and left a redundant read-only wrapper process; a bounded fixed-evidence CLIProxy rerun produced the admitted verdict, and the stale process was terminated without repository mutation. Collaboration payload delivery to the intended model-specific reviewer was unavailable, so the explicit CLIProxy wrapper was used with provider and model pinned. Future model challenges must use one bounded fixed-evidence prompt, one finite deadline, and process cleanup verification.",
+      "Closed the three-finding Plan 1 remediation without consuming another implementation-plan task. The first full-suite run caught retained exception context; one minimal api.py repair changed the fingerprint, and the required full rerun passed 560/560. Independent review then caught an evidence-packaging gap; one evidence-only fix and scoped re-review closed it without source, index, HEAD, or package mutation."
     ]
   },
   "gates": [
@@ -218,11 +221,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "foundation.plan1.final_review_remediation",
-    "symptom": "Plan 1 final review remains ACCEPT_WITH_CHANGES because target-root policy is not bound to A/B/C snapshots, Continuity resolves the caller target before original-path symlink admission, and verify/audit/anchor SQLite access remains write-capable.",
-    "evidence_signature": "sha256:ca2d86e44285aa82e49d616224977c00243a25439c5c788886292017feb6ac50 plus tests/integration/test_policy_target_coexistence.py, tests/security/test_facade_target_admission.py, and tests/security/test_read_only_store_mode.py",
-    "hypothesis": "The preserved five-file production delta plus three focused public tests can reconstruct RED against immutable 90b94814, then pass the 11 focused cases and complete Plan 1 gates while preserving public schemas, target read-only behavior, external SQLite state, and zero runtime dependencies."
+    "gate": "evidence_resume_lineage.task1.stable_live_capture",
+    "symptom": "Plan 2 Task 1 stable live-worktree observation, descriptor-pinned ephemeral capture, public capability truth, race refusal, and maintainability extraction behind GitTargetAdapter remain unimplemented.",
+    "evidence_signature": "docs/plans/2026-08-08-02-evidence-resume-lineage.md:40-127 plus docs/superpowers/plans/2026-09-01-safe-simple-completion.md Task 2",
+    "hypothesis": "Public-boundary characterization followed by private process, locator, and proof seams can preserve GitTargetAdapter behavior while the detailed Plan 2 race and ephemeral-capture RED/GREEN tests prove stable live observations without target writes or caller knowledge of internals."
   },
-  "next_action": "Commit the corrected completion overlay and revision-39 loop-state admission, create its plan-scoped Superpowers ledger, then dispatch exactly one fresh TDD maker to reconstruct RED, adopt the preserved three-finding remediation, run complete Plan 1 gates, and commit only the five production files plus three focused tests before immutable independent review.",
+  "next_action": "Commit revision-40 Plan 1 acceptance state, generate overlay Task 2's plan-scoped brief, and dispatch exactly one fresh TDD maker for stable live capture and first-touch Git internal extraction; no concurrent hot-file maker.",
   "verdict": "IN_PROGRESS"
 }
