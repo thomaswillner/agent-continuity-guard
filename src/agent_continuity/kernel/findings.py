@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .canonical import CanonicalJSONError, canonical_bytes, canonical_loads
 from .evaluation import Verdict
-from .model import JsonObject, RecordId
+from .model import JsonObject, JsonValue, RecordId
 from .records import require_digest
+
+if TYPE_CHECKING:
+    from .invalidation import Invalidation
 
 _CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _MESSAGE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,191}$")
@@ -67,3 +71,39 @@ def finding_payload(finding: Finding) -> JsonObject:
         "subject_id": finding.subject_id,
         "verdict": finding.verdict.value,
     }
+
+
+def findings_from_invalidations(
+    invalidations: tuple[Invalidation, ...],
+) -> tuple[Finding, ...]:
+    """Normalize non-current evidence states into existing Finding/v1 values."""
+
+    from .invalidation import EvidenceState, Invalidation
+
+    if type(invalidations) is not tuple or any(
+        type(item) is not Invalidation for item in invalidations
+    ):
+        raise CanonicalJSONError("invalidations must be an immutable tuple")
+    findings: list[Finding] = []
+    for invalidation in invalidations:
+        if invalidation.state is EvidenceState.CURRENT:
+            continue
+        causes: list[JsonValue] = list(invalidation.direct_cause_ids)
+        path: list[JsonValue] = list(invalidation.transitive_path)
+        findings.append(
+            Finding(
+                code=invalidation.code,
+                verdict=(
+                    Verdict.BLOCK
+                    if invalidation.state is EvidenceState.INVALIDATED
+                    else Verdict.UNKNOWN
+                ),
+                subject_id=invalidation.evidence_id,
+                message_id=f"acg.{invalidation.code}",
+                parameters={
+                    "direct_cause_ids": causes,
+                    "transitive_path": path,
+                },
+            )
+        )
+    return tuple(findings)

@@ -11,6 +11,7 @@ from .model import JsonObject
 
 if TYPE_CHECKING:
     from .findings import Finding
+    from .invalidation import EvidenceEvaluationInput
 
 
 class Verdict(StrEnum):
@@ -38,6 +39,7 @@ class Profile(StrEnum):
 class EvaluationCase:
     profile: Profile
     findings: tuple[Finding, ...]
+    evidence_input: EvidenceEvaluationInput | None = None
 
     def __post_init__(self) -> None:
         from .findings import Finding
@@ -48,6 +50,11 @@ class EvaluationCase:
             type(item) is not Finding for item in self.findings
         ):
             raise CanonicalJSONError("evaluation findings must be an immutable tuple")
+        if self.evidence_input is not None:
+            from .invalidation import EvidenceEvaluationInput
+
+            if type(self.evidence_input) is not EvidenceEvaluationInput:
+                raise CanonicalJSONError("evaluation evidence input is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +77,20 @@ class EvaluationResult:
 
 
 def evaluate(case: EvaluationCase) -> EvaluationResult:
-    from .findings import finding_payload
+    from .findings import finding_payload, findings_from_invalidations
+    from .invalidation import evaluate_invalidations
 
+    supplied_findings = case.findings
+    if case.evidence_input is not None:
+        supplied_findings += findings_from_invalidations(
+            evaluate_invalidations(
+                case.evidence_input.evidence,
+                case.evidence_input.context,
+            )
+        )
     findings = tuple(
         sorted(
-            case.findings,
+            supplied_findings,
             key=lambda item: (
                 VERDICT_RANK[item.verdict],
                 canonical_bytes(finding_payload(item)),
