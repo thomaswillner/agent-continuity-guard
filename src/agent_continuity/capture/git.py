@@ -58,11 +58,9 @@ from ._git_locator import (
     stat_identity as _stat_identity,
 )
 from ._git_process import (
-    descriptor_git_argv,
     remaining_timeout,
     resolve_git_executable,
-    run_bounded,
-    sanitized_environment,
+    run_git,
     verify_git_executable,
 )
 from ._git_proof import (
@@ -419,39 +417,26 @@ class GitTargetAdapter:
         self,
         target: Path | int,
         args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
     ) -> bytes:
         if not isinstance(target, int) or os.name != "posix":
             raise CaptureUnknownError("descriptor-addressed Git is unsupported")
-        argv = descriptor_git_argv(target, args, self._git_executable)
-        result = run_bounded(
-            argv,
-            env=sanitized_environment(),
+        result = run_git(
+            target,
+            args,
+            self._git_executable,
             timeout=remaining_timeout(self._active_deadline),
             max_output=_MAX_GIT_OUTPUT,
-            input_data=input_data,
-            pass_fds=(target,),
         )
-        if result.returncode not in allowed_codes:
+        if result.returncode != 0:
             raise CaptureUnknownError("Git observation did not establish proof")
         return result.stdout
 
     def _run(
         self,
         args: tuple[str, ...],
-        *,
-        allowed_codes: tuple[int, ...] = (0,),
-        input_data: bytes | None = None,
     ) -> bytes:
         self._verify_pinned_directories()
-        output = self._run_at(
-            self._descriptor_git_fd(),
-            args,
-            allowed_codes=allowed_codes,
-            input_data=input_data,
-        )
+        output = self._run_at(self._descriptor_git_fd(), args)
         self._verify_pinned_directories()
         return output
 
@@ -975,21 +960,30 @@ class GitTargetAdapter:
             target_policy_digest=target_policy_after.digest,
         )
 
-    def _live_census(self) -> tuple[tuple[bytes, ...], tuple[bytes, ...]]:
-        tracked = _parse_nul_frame(self._run(("ls-files", "--cached", "-z")))
+    def _live_census(
+        self, index_paths: tuple[bytes, ...]
+    ) -> tuple[tuple[bytes, ...], tuple[bytes, ...], tuple[bytes, ...]]:
+        deleted = _parse_nul_frame(self._run(("ls-files", "--deleted", "-z")))
         untracked = _parse_nul_frame(
             self._run(("ls-files", "--others", "--exclude-standard", "-z"))
         )
-        for values in (tracked, untracked):
+        for values in (deleted, untracked):
             previous: bytes | None = None
             for raw_path in values:
                 _validate_repo_path(raw_path)
                 if previous is not None and raw_path <= previous:
                     raise CaptureUnknownError("Git live census is not ordered")
                 previous = raw_path
-        if set(tracked) & set(untracked):
+        index_set = frozenset(index_paths)
+        deleted_set = frozenset(deleted)
+        if not deleted_set.issubset(index_set):
+            raise CaptureUnknownError("Git deleted census differs from index")
+        if index_set & set(untracked):
             raise CaptureUnknownError("Git live census is ambiguous")
-        return tracked, untracked
+        tracked_worktree = tuple(
+            raw_path for raw_path in index_paths if raw_path not in deleted_set
+        )
+        return tracked_worktree, deleted, untracked
 
     def _capture_live(
         self, required_paths: Sequence[PathIdentityV1]
@@ -1061,9 +1055,8 @@ class GitTargetAdapter:
         tree_entries = parse_tree(
             self._run(("ls-tree", "-rz", "--full-tree", tree_oid)), object_format
         )
-        tracked, untracked = self._live_census()
-        if tracked != tuple(entry.path.raw_bytes() for entry in index_entries):
-            raise CaptureUnknownError("Git tracked census differs from index")
+        index_paths = tuple(entry.path.raw_bytes() for entry in index_entries)
+        tracked, deleted, untracked = self._live_census(index_paths)
         census = frozenset((*tracked, *untracked))
         retained = tuple(path.raw_bytes() for path in requested)
         observed = observe_tree(
@@ -1074,7 +1067,7 @@ class GitTargetAdapter:
             retained_paths=retained,
             check_deadline=self._check_deadline,
         )
-        tracked_after, untracked_after = self._live_census()
+        tracked_after, deleted_after, untracked_after = self._live_census(index_paths)
 
         locator_after = self._locator_manifest()
         target_policy_after = self._observe_file(
@@ -1104,6 +1097,7 @@ class GitTargetAdapter:
             or index_after != index_before
             or alternates_after != alternates_before
             or tracked_after != tracked
+            or deleted_after != deleted
             or untracked_after != untracked
         ):
             raise CaptureUnknownError("Git dependencies changed during live capture")
@@ -1127,6 +1121,12 @@ class GitTargetAdapter:
             == tuple(entry_key(entry) for entry in index_entries),
             "index": [
                 path_identity_payload(entry.path) for entry in index_entries
+            ],
+            "deleted_tracked_worktree": [
+                path_identity_payload(
+                    PathIdentityV1.from_bytes("git-path-bytes", raw_path)
+                )
+                for raw_path in deleted
             ],
             "tracked_worktree": [
                 path_identity_payload(

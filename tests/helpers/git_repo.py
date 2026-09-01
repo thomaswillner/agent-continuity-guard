@@ -11,7 +11,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias, cast
 
-ManifestValue: TypeAlias = tuple[str, int, int, int, str]
+ManifestValue: TypeAlias = tuple[
+    str,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    str,
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,10 +260,10 @@ def make_git_repo(
 
 def repository_write_manifest(root: Path) -> dict[str, ManifestValue]:
     manifest: dict[str, ManifestValue] = {}
-    for path in sorted(root.rglob("*"), key=lambda item: os.fsencode(item)):
-        relative = path.relative_to(root).as_posix()
+    paths = (root, *sorted(root.rglob("*"), key=lambda item: os.fsencode(item)))
+    for path in paths:
+        relative = "." if path == root else path.relative_to(root).as_posix()
         metadata = path.lstat()
-        mode = stat.S_IMODE(metadata.st_mode)
         if path.is_symlink():
             kind = "symlink"
             digest = hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
@@ -266,8 +278,14 @@ def repository_write_manifest(root: Path) -> dict[str, ManifestValue]:
             digest = ""
         manifest[relative] = (
             kind,
-            mode,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+            metadata.st_nlink,
+            getattr(metadata, "st_uid", -1),
+            getattr(metadata, "st_gid", -1),
             metadata.st_size,
+            metadata.st_ctime_ns,
             metadata.st_mtime_ns,
             digest,
         )

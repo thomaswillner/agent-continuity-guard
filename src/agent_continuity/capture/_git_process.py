@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -17,6 +18,21 @@ from typing import BinaryIO
 
 from ._git_locator import open_absolute_file, stat_identity
 from .base import CaptureUnknownError
+
+_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_FIXED_COMMANDS = frozenset(
+    {
+        ("config", "--no-includes", "--local", "--null", "--list"),
+        ("ls-files", "--deleted", "-z"),
+        ("ls-files", "--others", "--exclude-standard", "-z"),
+        ("ls-files", "--stage", "-z"),
+        ("rev-parse", "--is-bare-repository"),
+        ("rev-parse", "--is-inside-work-tree"),
+        ("rev-parse", "--show-object-format=input"),
+        ("rev-parse", "--show-object-format=storage"),
+        ("rev-parse", "--show-prefix"),
+    }
+)
 
 _DESCRIPTOR_GIT_BOOTSTRAP = (
     "import os,sys;"
@@ -48,7 +64,7 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
             process.wait(timeout=1)
 
 
-def run_bounded(
+def _run_bounded(
     argv: Sequence[str],
     *,
     env: Mapping[str, str],
@@ -134,7 +150,7 @@ def run_bounded(
     return BoundedResult(returncode, bytes(stdout), bytes(stderr))
 
 
-def sanitized_environment() -> dict[str, str]:
+def _sanitized_environment() -> dict[str, str]:
     return {
         "GIT_ATTR_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -150,7 +166,33 @@ def sanitized_environment() -> dict[str, str]:
     }
 
 
-def git_arguments(args: tuple[str, ...]) -> list[str]:
+def _admit_git_command(args: tuple[str, ...]) -> tuple[str, ...]:
+    if args in _FIXED_COMMANDS:
+        return args
+    if len(args) == 3 and args[:2] == ("rev-parse", "--verify"):
+        operand = args[2]
+        for suffix in ("^{commit}", "^{tree}"):
+            if operand.endswith(suffix) and _OID_RE.fullmatch(
+                operand[: -len(suffix)]
+            ):
+                return args
+    if (
+        len(args) == 4
+        and args[:3] == ("ls-tree", "-rz", "--full-tree")
+        and _OID_RE.fullmatch(args[3])
+    ):
+        return args
+    if (
+        len(args) == 3
+        and args[:2] == ("cat-file", "blob")
+        and _OID_RE.fullmatch(args[2])
+    ):
+        return args
+    raise CaptureUnknownError("Git command is outside fixed observation vocabulary")
+
+
+def _git_arguments(args: tuple[str, ...]) -> list[str]:
+    admitted = _admit_git_command(args)
     return [
         "--no-pager",
         "-c",
@@ -171,7 +213,7 @@ def git_arguments(args: tuple[str, ...]) -> list[str]:
         "submodule.recurse=false",
         "-c",
         "fetch.recurseSubmodules=false",
-        *args,
+        *admitted,
     ]
 
 
@@ -185,8 +227,25 @@ def descriptor_git_argv(
         _DESCRIPTOR_GIT_BOOTSTRAP,
         str(descriptor),
         os.fspath(executable),
-        *git_arguments(args),
+        *_git_arguments(args),
     ]
+
+
+def run_git(
+    descriptor: int,
+    args: tuple[str, ...],
+    executable: Path,
+    *,
+    timeout: float,
+    max_output: int,
+) -> BoundedResult:
+    return _run_bounded(
+        descriptor_git_argv(descriptor, args, executable),
+        env=_sanitized_environment(),
+        timeout=timeout,
+        max_output=max_output,
+        pass_fds=(descriptor,),
+    )
 
 
 def resolve_git_executable() -> tuple[

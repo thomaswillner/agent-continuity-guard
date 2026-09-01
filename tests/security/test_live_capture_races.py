@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,10 +13,13 @@ from agent_continuity.capture import (
     CaptureUnknownError,
     GitTargetAdapter,
 )
+from agent_continuity.capture import (
+    coordinator as capture_coordinator,
+)
 from agent_continuity.capture.coordinator import CaptureCoordinator
 from agent_continuity.capture.filesystem import FilesystemTargetAdapter
 from agent_continuity.kernel.paths import PathIdentityV1
-from tests.helpers.git_repo import make_git_repo
+from tests.helpers.git_repo import make_git_repo, repository_write_manifest
 
 
 def _path(raw: bytes) -> PathIdentityV1:
@@ -196,3 +201,119 @@ def test_non_capable_live_promotion_is_unknown_while_git_snapshot_still_works(
     with pytest.raises(CaptureUnknownError):
         CaptureCoordinator(adapter).capture_stable()
     assert adapter.calls >= 2
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["mkdtemp", "open", "mkdir", "write", "fsync", "cleanup"],
+)
+def test_ephemeral_filesystem_failures_are_sanitized_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    target = tmp_path / "ephemeral-failure-target"
+    nested = target / "nested"
+    nested.mkdir(parents=True)
+    (nested / "cited.txt").write_bytes(b"captured bytes\n")
+    identity = _path(b"nested/cited.txt")
+    created: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+    real_open = os.open
+    real_rmtree = shutil.rmtree
+
+    def tracked_mkdtemp(*, prefix: str) -> str:
+        if failure == "mkdtemp":
+            raise OSError("raw mkdtemp failure")
+        value = Path(real_mkdtemp(prefix=prefix, dir=tmp_path))
+        created.append(value)
+        return os.fspath(value)
+
+    monkeypatch.setattr(capture_coordinator.tempfile, "mkdtemp", tracked_mkdtemp)
+    if failure == "open":
+
+        def fail_ephemeral_open(
+            path: str | bytes | Path,
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            if isinstance(path, Path) and path in created:
+                raise OSError("raw open failure")
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        monkeypatch.setattr(capture_coordinator.os, "open", fail_ephemeral_open)
+    elif failure == "mkdir":
+        real_mkdir = os.mkdir
+
+        def fail_ephemeral_mkdir(
+            path: str | bytes,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            if path == b"nested":
+                raise OSError("raw mkdir failure")
+            real_mkdir(path, mode, dir_fd=dir_fd)
+
+        monkeypatch.setattr(capture_coordinator.os, "mkdir", fail_ephemeral_mkdir)
+    elif failure in {"write", "cleanup"}:
+
+        def fail_ephemeral_write(
+            _descriptor: int, _content: bytes | bytearray
+        ) -> int:
+            raise OSError("raw write failure")
+
+        monkeypatch.setattr(capture_coordinator.os, "write", fail_ephemeral_write)
+        if failure == "cleanup":
+
+            def fail_cleanup(_path: str | bytes | Path) -> None:
+                raise OSError("raw cleanup failure")
+
+            monkeypatch.setattr(capture_coordinator.shutil, "rmtree", fail_cleanup)
+    elif failure == "fsync":
+
+        def fail_ephemeral_fsync(_descriptor: int) -> None:
+            raise OSError("raw fsync failure")
+
+        monkeypatch.setattr(capture_coordinator.os, "fsync", fail_ephemeral_fsync)
+
+    try:
+        with pytest.raises(
+            CaptureUnknownError,
+            match=r"^ephemeral capture could not be materialized$",
+        ) as captured_error:
+            CaptureCoordinator(FilesystemTargetAdapter(target)).capture_stable(
+                (identity,)
+            )
+        assert isinstance(captured_error.value.__cause__, OSError)
+        if failure == "cleanup":
+            assert str(captured_error.value.__cause__) == "raw write failure"
+    finally:
+        for path in created:
+            real_rmtree(path, ignore_errors=True)
+
+
+def test_repository_write_manifest_detects_same_byte_leaf_replacement(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "manifest-target"
+    target.mkdir()
+    leaf = target / "same.txt"
+    leaf.write_bytes(b"same bytes\n")
+    before_metadata = leaf.stat()
+    before = repository_write_manifest(target)
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_bytes(b"same bytes\n")
+    replacement.chmod(before_metadata.st_mode)
+    os.utime(
+        replacement,
+        ns=(before_metadata.st_atime_ns, before_metadata.st_mtime_ns),
+    )
+
+    os.replace(replacement, leaf)
+    after = repository_write_manifest(target)
+
+    assert before["same.txt"] != after["same.txt"]
+    assert "." in before

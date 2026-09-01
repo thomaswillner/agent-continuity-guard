@@ -75,13 +75,14 @@ class CaptureCoordinator:
     def _materialize(self, captured: _LiveCapture) -> Path | None:
         if not captured.required_contents:
             return None
-        root = Path(tempfile.mkdtemp(prefix="acg-capture-"))
-        target_root = getattr(self._adapter, "root", None)
-        if isinstance(target_root, Path) and root.is_relative_to(target_root):
-            shutil.rmtree(root)
-            raise CaptureUnknownError("ephemeral capture root overlaps target")
-        root_fd = os.open(root, os.O_RDONLY)
+        root: Path | None = None
+        root_fd = -1
         try:
+            root = Path(tempfile.mkdtemp(prefix="acg-capture-"))
+            target_root = getattr(self._adapter, "root", None)
+            if isinstance(target_root, Path) and root.is_relative_to(target_root):
+                raise CaptureUnknownError("ephemeral capture root overlaps target")
+            root_fd = os.open(root, os.O_RDONLY)
             for path, content in captured.required_contents.items():
                 current = os.dup(root_fd)
                 components = path.raw_bytes().split(b"/")
@@ -112,12 +113,30 @@ class CaptureCoordinator:
                 finally:
                     os.close(current)
             os.fsync(root_fd)
+            os.close(root_fd)
+            root_fd = -1
+            return root
+        except CaptureUnknownError:
+            if root is not None:
+                with contextlib.suppress(OSError):
+                    shutil.rmtree(root)
+            raise
+        except OSError as error:
+            if root is not None:
+                with contextlib.suppress(OSError):
+                    shutil.rmtree(root)
+            raise CaptureUnknownError(
+                "ephemeral capture could not be materialized"
+            ) from error
         except BaseException:
-            shutil.rmtree(root)
+            if root is not None:
+                with contextlib.suppress(OSError):
+                    shutil.rmtree(root)
             raise
         finally:
-            os.close(root_fd)
-        return root
+            if root_fd >= 0:
+                with contextlib.suppress(OSError):
+                    os.close(root_fd)
 
 
 def snapshot_findings(

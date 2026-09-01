@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from agent_continuity.capture import CaptureUnknownError, GitTargetAdapter
+from agent_continuity.capture import (
+    CaptureRequestError,
+    CaptureUnknownError,
+    GitTargetAdapter,
+)
 from agent_continuity.capture.coordinator import CaptureCoordinator
 from agent_continuity.capture.filesystem import FilesystemTargetAdapter
 from agent_continuity.kernel.canonical import digest_bytes
@@ -79,6 +83,46 @@ def test_git_stable_capture_promotes_dirty_tracked_and_nonignored_untracked(
     assert _captured_bytes(view.ephemeral_root, required[0]) == dirty
     assert _captured_bytes(view.ephemeral_root, required[1]) == b"raw untracked bytes\n"
     assert repository_write_manifest(repo.root) == before
+    shutil.rmtree(view.ephemeral_root)
+
+
+def test_git_stable_capture_separates_index_and_tracked_worktree_census(
+    tmp_path: Path,
+) -> None:
+    repo = make_git_repo(tmp_path)
+    modified = _path(b"README.md", git=True)
+    present = _path(b"AGENTS.md", git=True)
+    deleted = _path(b"docs/guide.txt", git=True)
+    untracked = _path(b"notes.bin", git=True)
+    (repo.root / "README.md").write_bytes(b"modified tracked bytes\n")
+    (repo.root / "docs" / "guide.txt").unlink()
+    (repo.root / "notes.bin").write_bytes(b"untracked bytes\n")
+
+    with GitTargetAdapter(repo.root) as adapter:
+        view = CaptureCoordinator(adapter).capture_stable(
+            (modified, present, untracked)
+        )
+        with pytest.raises(CaptureRequestError):
+            CaptureCoordinator(adapter).capture_stable((deleted,))
+
+    assert tuple(path.raw_bytes() for path in view.files) == (
+        b".gitignore",
+        b"AGENTS.md",
+        b"README.md",
+        b"latest",
+        b"notes.bin",
+    )
+    assert deleted not in view.files
+    assert view.files[modified].content_digest == digest_bytes(
+        b"modified tracked bytes\n"
+    )
+    assert view.files[present].content_digest == digest_bytes(
+        b"# Synthetic instructions\n"
+    )
+    assert view.files[untracked].content_digest == digest_bytes(
+        b"untracked bytes\n"
+    )
+    assert view.ephemeral_root is not None
     shutil.rmtree(view.ephemeral_root)
 
 

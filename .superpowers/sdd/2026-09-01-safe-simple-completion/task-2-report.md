@@ -169,3 +169,110 @@ tests/security/test_no_target_writes.py::test_public_cli_commands_preserve_targe
 - No target, remote, runtime, provider, OpenClaw, release, publication, or unrelated workspace mutation occurred. External build artifacts remain at `/tmp/acg-task2-build.aWfOYb`; they are intentionally outside the worktree.
 - Failure-fingerprint budget: one full-Ruff formatting fingerprint was corrected once and passed on the next invocation. No unchanged fingerprint reached two attempts.
 - Remaining concern: controller-owned fresh read-only checker and downstream package/release decisions remain pending. Maker does not certify those gates.
+
+## Fix Round 1 — four Important findings
+
+### Admission and RED
+
+- Exact fix base: `dea9a865f62aed1036e143044dccf266b64eda50`; branch source status was clean before mutation.
+- Review artifact: `.superpowers/sdd/2026-09-01-safe-simple-completion/task-2-review.md`; it remained read-only.
+- Authorized fix paths: implicated capture source, existing focused tests, `tests/helpers/git_repo.py`, this report, and controller-authorized new contract path `tests/contract/test_git_process_vocabulary.py`.
+
+All tests were added before production changes. Combined genuine RED:
+
+```text
+$ .venv/bin/python -m pytest -q -p no:cacheprovider tests/contract/test_git_process_vocabulary.py tests/integration/test_live_worktree_capture.py tests/security/test_live_capture_races.py
+FFFFFF..F.............FFFFFFF                                            [100%]
+14 failed, 15 passed in 2.99s
+```
+
+Failure allocation was exact: five arbitrary Git commands were admitted and
+the generic `run_bounded` seam remained present; stable capture rejected one
+tracked deletion as census drift; six materialization operations leaked raw
+`OSError` (cleanup replaced the original failure); and same-byte leaf
+replacement produced an equal target manifest.
+
+### Finding 1 — separate index and tracked-worktree inventories
+
+- Production: `src/agent_continuity/capture/git.py` now uses raw index entries as the index inventory, derives present tracked-worktree paths from the separately observed `ls-files --deleted -z` set, inventories nonignored untracked paths separately, and binds deleted tracked paths explicitly in the canonical inventory.
+- Stability: before/after deleted, present tracked, and untracked censuses must all match. Missing tracked worktree bytes remain absent from `CapturedView.files`; requesting such missing bytes raises `CaptureRequestError`.
+- Test: `tests/integration/test_live_worktree_capture.py::test_git_stable_capture_separates_index_and_tracked_worktree_census` covers modified, present, deleted, and untracked identities plus missing-required refusal.
+
+### Finding 2 — fixed Git process vocabulary
+
+- Production: `src/agent_continuity/capture/_git_process.py` retains bounded lifecycle mechanics only as private implementation. Imported seam `run_git` owns the sanitized environment and admits only the exact ACG observation vocabulary. Dynamic commit/tree/blob operands require lowercase 40- or 64-hex object IDs before argv construction.
+- Integration: `src/agent_continuity/capture/git.py` no longer supplies arbitrary argv environments, allowed-code sets, or stdin to a generic process runner.
+- Test: `tests/contract/test_git_process_vocabulary.py` rejects status, config injection, symbolic `HEAD`, cat-file option injection, and the retired cached census; it also proves no generic `run_bounded` attribute and admits a validated dynamic object ID.
+
+### Finding 3 — sanitized ephemeral filesystem failures
+
+- Production: `src/agent_continuity/capture/coordinator.py` maps mkdtemp/open/mkdir/write/fsync/close failures to the single sanitized `CaptureUnknownError` boundary, removes partial ephemeral roots when possible, suppresses cleanup replacement errors, and preserves the original `OSError` as cause.
+- Test: `tests/security/test_live_capture_races.py::test_ephemeral_filesystem_failures_are_sanitized_unknown` covers six cases: mkdtemp, root open, nested mkdir, write, fsync, and cleanup failure masking.
+
+### Finding 4 — exact target manifest
+
+- Helper: `tests/helpers/git_repo.py::repository_write_manifest` now includes root plus every descendant and binds kind, device, inode, full mode/type, link count, UID/GID where available, size, ctime, mtime, and content or symlink-target digest.
+- Test: `tests/security/test_live_capture_races.py::test_repository_write_manifest_detects_same_byte_leaf_replacement` preserves bytes, size, mode, and mtime across replacement and proves the leaf manifest still changes; it also proves root inclusion.
+
+### GREEN and completion gates
+
+Same combined focused command after minimal production fixes:
+
+```text
+$ .venv/bin/python -m pytest -q -p no:cacheprovider tests/contract/test_git_process_vocabulary.py tests/integration/test_live_worktree_capture.py tests/security/test_live_capture_races.py
+29 passed in 3.36s
+```
+
+After deterministic import formatting, the same focused gate remained green:
+
+```text
+29 passed in 3.47s
+```
+
+Complete final-tree gates:
+
+```text
+$ .venv/bin/python -m pytest -q -p no:cacheprovider
+591 passed in 344.95s (0:05:44)
+
+$ .venv/bin/python -m mypy src/agent_continuity
+Success: no issues found in 30 source files
+
+$ .venv/bin/python -m ruff check .
+All checks passed!
+
+$ .venv/bin/python tools/verify_schemas.py
+{"schema":"SchemaVerification/v1","schema_count":25,"status":"pass"}
+```
+
+External-output package build:
+
+```text
+$ .venv/bin/python -m build --outdir /tmp/acg-task2-fix1-build.2sX6vU
+Successfully built agent_continuity_guard-0.1.0.dev0.tar.gz and agent_continuity_guard-0.1.0.dev0-py3-none-any.whl
+/tmp/acg-task2-fix1-build.2sX6vU/agent_continuity_guard-0.1.0.dev0-py3-none-any.whl
+/tmp/acg-task2-fix1-build.2sX6vU/agent_continuity_guard-0.1.0.dev0.tar.gz
+```
+
+Installed-wheel and exact target-manifest receipts:
+
+```text
+$ .venv/bin/python -m pytest -v -p no:cacheprovider tests/integration/test_installed_wheel_plan1.py
+tests/integration/test_installed_wheel_plan1.py::test_installed_wheel_runs_complete_plan1_public_workflow PASSED [100%]
+1 passed in 13.48s
+
+$ .venv/bin/python -m pytest -v -p no:cacheprovider tests/security/test_live_capture_races.py::test_repository_write_manifest_detects_same_byte_leaf_replacement tests/integration/test_live_worktree_capture.py::test_git_stable_capture_promotes_dirty_tracked_and_nonignored_untracked tests/integration/test_live_worktree_capture.py::test_filesystem_capture_is_deterministic_identity_bound_and_read_only tests/security/test_no_target_writes.py::test_public_cli_commands_preserve_target_and_keep_raw_inputs_external
+tests/security/test_live_capture_races.py::test_repository_write_manifest_detects_same_byte_leaf_replacement PASSED [ 25%]
+tests/integration/test_live_worktree_capture.py::test_git_stable_capture_promotes_dirty_tracked_and_nonignored_untracked PASSED [ 50%]
+tests/integration/test_live_worktree_capture.py::test_filesystem_capture_is_deterministic_identity_bound_and_read_only PASSED [ 75%]
+tests/security/test_no_target_writes.py::test_public_cli_commands_preserve_target_and_keep_raw_inputs_external PASSED [100%]
+4 passed in 10.91s
+```
+
+### Fix-round self-review and commit contract
+
+- Pre-report dirty cardinality was seven exact authorized paths; report is the eighth. `git diff --check` passed and `src/agent_continuity/capture/__init__.py` remains unchanged.
+- Ruff initially found two import-order defects and one regex-style defect. Manual correction left one import-order fingerprint; the two-strike rule triggered a deterministic Ruff organizer pivot for that single authorized file, after which full Ruff passed.
+- No deferred Minor undecodable-path fixture was changed. No loop state, brief, ledger, review package, unrelated path, subagent, network, provider, OpenClaw, remote, release, or publication action occurred.
+- Fix commit contract: one local commit with subject `fix: close stable capture review gaps`, DCO trailer, and exactly the eight fix-owned paths. Containing hash is recorded by the post-commit receipt rather than self-referenced in this report.
+- Maker verdict: `PASS` for Fix Round 1 once this exact report/source/test tree becomes that DCO commit. Fresh controller re-review remains required; maker does not certify independent acceptance.
