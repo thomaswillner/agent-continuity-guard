@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 38,
+  "revision": 39,
   "contract": {
     "revision": 3,
     "goal": {
@@ -112,7 +112,11 @@
       "Task 8 commits e9f631f, c2acba0, 17d3802, eeab9af, and ef8a622 implement the installed `acg` command tree, canonical success/error output, stable exit mapping, Error/v1, exclusive 0600 descriptor-pinned anchor export, audit verification, and hardened alias, rename, reparent, fsync, close, cleanup, and request/integrity boundaries. Independent acceptance passes after two scoped fix rounds. Controller evidence passes 536 full and 82 focused/affected tests, strict mypy, Ruff, 25 schemas, fresh installed-wheel all-command smoke with exits 0/1/2/3, canonical output, target/store invariance, exact seven-path inventory, five DCO sign-offs, and a 27-plugin zero-candidate secret scan at tree 347b21bbb5a806aad1384dc0b4d872e1c047a456.",
       "On 2026-08-13 Thomas approved category-correct benchmarking, zero-waiver production gates, the best-in-tested-scope claim rule, a public development corpus plus sealed holdout, and Python 3.11-3.14 across macOS/Linux/Windows. The approval authorizes design artifacts; written-specification review remains the implementation-planning gate.",
       "Fresh installed-wheel proof on 2026-08-13 built and imported agent-continuity-guard 0.1.0.dev0 under Python 3.12, while installed acg --help exited 1 with ModuleNotFoundError for agent_continuity.cli.",
-      "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md."
+      "Official-source comparison audit froze direct, harness-native, code-staleness, capability-scorecard, and evaluation-source lanes; competitor artifacts are identified in docs/superpowers/specs/2026-08-13-production-benchmark-design.md.",
+      "Foundation Task 9 is complete at immutable commit 90b94814ac8147bcf833947cd1693bdb852682c8. Maker report sha256:7f46d44f71627ac973744f46f1fbcc40ba63f97c51b5c6629d69bac3f5ab54e7 records signed commits a198cad and 90b94814, 12 focused and 549 full tests; re-review sha256:f495dcdb68e5c8ff7bb0b19bc0e36e00ce302c5706fe134b6bbc9282a4f5f7eb reports all findings addressed. Controller gate sha256:b709cbc76020b31fdb6042f35361eeeb96d58c2766e7851e39f9b58242fa7a55 passes 549 tests, strict mypy over 26 source files, Ruff, 25 schemas, wheel and sdist build/install, and zero runtime dependencies.",
+      "Whole-Plan-1 final review sha256:ca2d86e44285aa82e49d616224977c00243a25439c5c788886292017feb6ac50 accepts Task 9 behavior but requires three Important remediations before Plan 1 acceptance: bind target-root policy to A/B/C snapshots, admit the original caller target path before symlink resolution, and use genuinely read-only SQLite access for verify/audit/anchor paths. The preserved worktree has five modified production files plus three untracked remediation tests; 11 focused tests pass, but no dirty-worktree full-suite claim is recorded.",
+      "A bounded read-only GLM glm-5.2 challenge at sha256:b4fa318c650a19a33768615d64849cce9b31a83ce5b138fa6e6c8e60e8333dd1 returned ACCEPT_WITH_CHANGES. Controller reconciliation accepted stale Task 9 accounting, Context Task 5 dependency inversion, Superpowers commit/review conflict, and delayed first-touch StateStore/Continuity extraction; no evidence contradicted MIT/public-safe, zero-dependency, no-Kimi/OpenClaw/provider, guarded-target read-only, external-SQLite, deterministic-automatic-promotion, human-non-override, or no-publication boundaries. The local CLIProxy route exposed requested model ID glm-5.2 only; a GLM 5.3 served alias remains unsupported or unknown.",
+      "Loop-engineering strict routing reports no contract gaps: root primary plan-execute-replan with maker-checker wrapper; the currently admitted Plan 1 remediation slice routes to TDD with maker-checker. Tree of Thoughts, monitor/retry, META optimization, multi-agent debate, concurrent makers, and mechanical runtime enforcement are rejected for this slice."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -143,7 +147,10 @@
       "Recorded design-only authorization and retained written-specification approval as the next human gate before implementation planning.",
       "Thomas approved the written specification and then explicitly added U-shaped lost-in-the-middle containment as the next objective using the already described canonical-projection, structured-probe, verified-transition architecture.",
       "RAG confirmed the repository research already requires position randomization and canonical comparison; bounded strategy search rejected prompt duplication and full-history retrieval as trust roots and selected external canonical projections.",
-      "The lost-in-the-middle implementation plan maps the approved containment contract into six dependency-ordered TDD tasks and 33 concrete steps; two Self-Refine passes removed placeholder admission values, interface drift, checker-metadata leakage, undeclared dependencies, mutable block models, ambiguous position measurement, and prerequisite ordering defects."
+      "The lost-in-the-middle implementation plan maps the approved containment contract into six dependency-ordered TDD tasks and 33 concrete steps; two Self-Refine passes removed placeholder admission values, interface drift, checker-metadata leakage, undeclared dependencies, mutable block models, ambiguous position measurement, and prerequisite ordering defects.",
+      "Reconciled Task 9 as completed implementation task 9 of 38; retained its immutable evidence and replaced the stale rerun instruction with the three-finding Plan 1 final-review remediation fingerprint.",
+      "Corrected the completion overlay before dispatch: maker commits precede immutable review packaging; checkers inspect packages and receipts without duplicating full maker suites; Context Tasks 1 through 4 now precede Context Task 5; Plan 2 Tasks 5 through 6 remain separate; StateStore/Continuity extraction occurs inside ResumeContext's first api.py/SQLite feature touch.",
+      "Project-local coordination learning: the first broad GLM challenge exceeded its 900-second ceiling and left a redundant read-only wrapper process; a bounded fixed-evidence CLIProxy rerun produced the admitted verdict, and the stale process was terminated without repository mutation. Collaboration payload delivery to the intended model-specific reviewer was unavailable, so the explicit CLIProxy wrapper was used with provider and model pinned. Future model challenges must use one bounded fixed-evidence prompt, one finite deadline, and process cleanup verification."
     ]
   },
   "gates": [
@@ -201,7 +208,7 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 8,
+      "implementation_plan_tasks": 9,
       "task4_fix_rounds": 5,
       "task4_post_breaker_attempts": 1,
       "task4_post_breaker_reviews": 1,
@@ -211,11 +218,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "foundation.task9.installed_plan1",
-    "symptom": "Plan 1 lacks one installed-wheel end-to-end proof covering every command, target-write invariance, anchor truncation/tamper detection, overlap refusal, persisted-byte privacy, and truthful public documentation.",
-    "evidence_signature": ".superpowers/sdd/2026-08-08-01-foundation-checkpoint/task-9-brief.md",
-    "hypothesis": "Installed-wheel subprocess tests over a clean Git fixture can prove the accepted package and CLI composition without relying on source-tree imports or mutating protected target state."
+    "gate": "foundation.plan1.final_review_remediation",
+    "symptom": "Plan 1 final review remains ACCEPT_WITH_CHANGES because target-root policy is not bound to A/B/C snapshots, Continuity resolves the caller target before original-path symlink admission, and verify/audit/anchor SQLite access remains write-capable.",
+    "evidence_signature": "sha256:ca2d86e44285aa82e49d616224977c00243a25439c5c788886292017feb6ac50 plus tests/integration/test_policy_target_coexistence.py, tests/security/test_facade_target_admission.py, and tests/security/test_read_only_store_mode.py",
+    "hypothesis": "The preserved five-file production delta plus three focused public tests can reconstruct RED against immutable 90b94814, then pass the 11 focused cases and complete Plan 1 gates while preserving public schemas, target read-only behavior, external SQLite state, and zero runtime dependencies."
   },
-  "next_action": "Dispatch a fresh TDD maker for Foundation Task 9 installed Plan 1 proof, then run the Plan 1 completion gate and independent whole-plan review.",
+  "next_action": "Commit the corrected completion overlay and revision-39 loop-state admission, create its plan-scoped Superpowers ledger, then dispatch exactly one fresh TDD maker to reconstruct RED, adopt the preserved three-finding remediation, run complete Plan 1 gates, and commit only the five production files plus three focused tests before immutable independent review.",
   "verdict": "IN_PROGRESS"
 }
