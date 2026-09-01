@@ -138,6 +138,7 @@ class _Observation:
     config_digest: Digest
     dependency_digest: Digest
     instructions: tuple[InstructionFileV1, ...]
+    target_policy_digest: Digest | None
 
 
 def _stop_process(process: subprocess.Popen[bytes]) -> None:
@@ -1753,6 +1754,12 @@ class GitTargetAdapter:
 
     def _observe(self, requested: tuple[PathIdentityV1, ...]) -> _Observation:
         locator_before = self._locator_manifest()
+        target_policy_before = self._observe_file(
+            self._root_fd,
+            b"acg.toml",
+            required=False,
+            max_bytes=_MAX_METADATA_BYTES,
+        )
         config_before = self._config_sources()
         attributes_before = self._attribute_sources()
         ignores_before = self._ignore_sources()
@@ -1822,6 +1829,12 @@ class GitTargetAdapter:
         remote_digest = self._remote_identity_digest(config)
 
         locator_after = self._locator_manifest()
+        target_policy_after = self._observe_file(
+            self._root_fd,
+            b"acg.toml",
+            required=False,
+            max_bytes=_MAX_METADATA_BYTES,
+        )
         config_after = self._config_sources()
         attributes_after = self._attribute_sources()
         ignores_after = self._ignore_sources()
@@ -1835,6 +1848,7 @@ class GitTargetAdapter:
         alternates_after = self._alternates_source()
         if (
             locator_after != locator_before
+            or target_policy_after != target_policy_before
             or config_after != config_before
             or attributes_after != attributes_before
             or ignores_after != ignores_before
@@ -1867,7 +1881,37 @@ class GitTargetAdapter:
             config_digest=config_digest,
             dependency_digest=dependency_digest,
             instructions=instructions,
+            target_policy_digest=target_policy_after.digest,
         )
+
+    def read_target_policy(self) -> bytes | None:
+        """Read target-root policy through the admitted descriptor root."""
+
+        if self._active_deadline is not None:
+            raise CaptureUnknownError("concurrent capture is unsupported")
+        self._active_deadline = time.monotonic() + _MAX_CAPTURE_SECONDS
+        try:
+            self._verify_pinned_directories()
+            first = self._observe_file(
+                self._root_fd,
+                b"acg.toml",
+                required=False,
+                max_bytes=_MAX_METADATA_BYTES,
+            )
+            self._verify_pinned_directories()
+            second = self._observe_file(
+                self._root_fd,
+                b"acg.toml",
+                required=False,
+                max_bytes=_MAX_METADATA_BYTES,
+            )
+            self._verify_pinned_directories()
+            self._check_deadline()
+        finally:
+            self._active_deadline = None
+        if first != second:
+            raise CaptureUnknownError("target policy changed during bounded read")
+        return first.content
 
     def capture(self, instruction_paths: Sequence[bytes]) -> CaptureSnapshot:
         requested = self._validate_instruction_paths(instruction_paths)
@@ -1926,7 +1970,11 @@ class GitTargetAdapter:
             physical_root_fingerprint=physical_root_fingerprint,
             capabilities=self._capabilities(),
         )
-        return CaptureSnapshot(target=target, instructions=first.instructions)
+        return CaptureSnapshot(
+            target=target,
+            instructions=first.instructions,
+            target_policy_digest=first.target_policy_digest,
+        )
 
     @staticmethod
     def _capabilities() -> tuple[CapabilityClaimV1, ...]:

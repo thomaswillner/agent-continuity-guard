@@ -139,6 +139,11 @@ class InstructionFileV1:
 class CaptureSnapshot:
     target: TargetIdentityV1
     instructions: tuple[InstructionFileV1, ...]
+    target_policy_digest: Digest | None = None
+
+    def __post_init__(self) -> None:
+        if self.target_policy_digest is not None:
+            require_digest(self.target_policy_digest)
 
     def instruction_record(self) -> StoredRecord:
         return make_record(

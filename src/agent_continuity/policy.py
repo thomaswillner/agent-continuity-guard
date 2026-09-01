@@ -504,6 +504,20 @@ def load_policy(*, target: Path, explicit: Path | None) -> LoadedPolicy:
     )
 
 
+def load_target_policy(authoring: bytes | None) -> LoadedPolicy:
+    """Compile policy bytes observed through an admitted target adapter."""
+
+    if authoring is not None and type(authoring) is not bytes:
+        raise PolicyRequestError("target policy authoring is invalid")
+    selected = _BUILTIN_BYTES if authoring is None else authoring
+    compiled = _compile(selected)
+    return LoadedPolicy(
+        compiled=compiled,
+        source="builtin" if authoring is None else "target",
+        source_digest=compiled.authoring_digest,
+    )
+
+
 def apply_facade_overrides(
     loaded: LoadedPolicy,
     *,
@@ -571,7 +585,7 @@ def apply_facade_overrides(
     return LoadedPolicy(
         compiled=compiled,
         source=f"{loaded.source}+facade",
-        source_digest=compiled.authoring_digest,
+        source_digest=loaded.source_digest,
     )
 
 

@@ -13,7 +13,12 @@ from threading import Lock
 from typing import Final, cast
 
 from agent_continuity.adapters import Clock, SystemClock
-from agent_continuity.capture import CaptureSnapshot, GitTargetAdapter, TargetAdapter
+from agent_continuity.capture import (
+    CaptureRequestError,
+    CaptureSnapshot,
+    GitTargetAdapter,
+    TargetAdapter,
+)
 from agent_continuity.capture.coordinator import (
     evaluate_checkpoint_capture,
     snapshot_findings,
@@ -49,7 +54,12 @@ from agent_continuity.kernel.records import (
     build_ruleset,
     make_record,
 )
-from agent_continuity.policy import LoadedPolicy, apply_facade_overrides, load_policy
+from agent_continuity.policy import (
+    LoadedPolicy,
+    apply_facade_overrides,
+    load_policy,
+    load_target_policy,
+)
 from agent_continuity.store import (
     AuditEventDraft,
     SensitiveLocalValueDraft,
@@ -157,6 +167,7 @@ def _open_existing_store(
     git_directory: Path | None,
     state_home: Path,
     database_name: str,
+    read_only: bool,
 ) -> Iterator[SQLiteStateStore]:
     """Open an existing session store without admitting store creation."""
 
@@ -171,6 +182,7 @@ def _open_existing_store(
             state_root,
             database_name=database_name,
             store_id=None,
+            read_only=read_only,
         )
     except StoreValidationError:
         missing = True
@@ -230,6 +242,17 @@ def _forced_refusal(result: EvaluationResult) -> EvaluationResult:
     return EvaluationResult(verdict, False, result.findings)
 
 
+def _snapshot_matches_policy(
+    snapshot: CaptureSnapshot,
+    loaded_policy: LoadedPolicy,
+) -> bool:
+    if loaded_policy.source.startswith("target"):
+        return snapshot.target_policy_digest == loaded_policy.source_digest
+    if loaded_policy.source.startswith("builtin"):
+        return snapshot.target_policy_digest is None
+    return True
+
+
 class Continuity:
     """Public facade that hides capture ordering and genesis transactions."""
 
@@ -267,20 +290,22 @@ class Continuity:
         clock: Clock | None = None,
         target_adapter: TargetAdapter | None = None,
     ) -> Continuity:
-        target_path: Path | None = None
         try:
-            candidate = Path(target)
-            resolved = candidate.resolve(strict=True)
-            if resolved.is_dir():
-                target_path = resolved
-        except (OSError, RuntimeError, TypeError, ValueError):
-            pass
-        if target_path is None:
+            admitted_adapter = GitTargetAdapter(target)
+        except CaptureRequestError:
+            admitted_adapter = None
+        if admitted_adapter is None:
             raise ContinuityRequestError("continuity target is unavailable")
-        selected_policy = load_policy(
-            target=target_path,
-            explicit=None if policy is None else Path(policy),
-        )
+        target_path = admitted_adapter.root
+        if policy is None:
+            selected_policy = load_target_policy(
+                admitted_adapter.read_target_policy()
+            )
+        else:
+            selected_policy = load_policy(
+                target=target_path,
+                explicit=Path(policy),
+            )
         selected_policy = apply_facade_overrides(
             selected_policy,
             profile=profile,
@@ -296,16 +321,10 @@ class Continuity:
             policy_id=selected_policy.compiled.policy_id,
             ruleset_id=RecordId("sha256:" + "4" * 64),
         )
-        adapter = (
-            GitTargetAdapter(target_path)
-            if target_adapter is None
-            else target_adapter
-        )
-        git_directory = (
-            adapter.git_common_directory
-            if isinstance(adapter, GitTargetAdapter)
-            else None
-        )
+        adapter = admitted_adapter if target_adapter is None else target_adapter
+        git_directory = admitted_adapter.git_common_directory
+        if target_adapter is not None:
+            admitted_adapter.close()
         return cls(
             target=target_path,
             git_directory=git_directory,
@@ -340,7 +359,11 @@ class Continuity:
         evaluation = evaluate(
             snapshot_findings(snapshot_a, snapshot_b, policy.profile)
         )
-        if snapshot_b != snapshot_a:
+        if (
+            snapshot_b != snapshot_a
+            or not _snapshot_matches_policy(snapshot_a, self._loaded_policy)
+            or not _snapshot_matches_policy(snapshot_b, self._loaded_policy)
+        ):
             raise TransitionRefused(_forced_refusal(evaluation))
         if not evaluation.transition_allowed:
             raise TransitionRefused(evaluation)
@@ -405,7 +428,9 @@ class Continuity:
         )
 
         snapshot_c = self._adapter.capture(requested)
-        if snapshot_c != snapshot_a:
+        if snapshot_c != snapshot_a or not _snapshot_matches_policy(
+            snapshot_c, self._loaded_policy
+        ):
             changed = evaluate(
                 snapshot_findings(snapshot_a, snapshot_c, policy.profile)
             )
@@ -552,6 +577,7 @@ class Continuity:
                 git_directory=self._git_directory,
                 state_home=self._state_home,
                 database_name=database_name,
+                read_only=True,
             ) as store:
                 if store.read_head(self._head_name) is not None:
                     matches.append(database_name)
@@ -563,7 +589,11 @@ class Continuity:
         return matches[0]
 
     @contextmanager
-    def _open_session_store(self) -> Iterator[SQLiteStateStore]:
+    def _open_session_store(
+        self,
+        *,
+        read_only: bool = True,
+    ) -> Iterator[SQLiteStateStore]:
         database_name = self._discover_database_name()
         missing = False
         with _open_existing_store(
@@ -571,6 +601,7 @@ class Continuity:
             git_directory=self._git_directory,
             state_home=self._state_home,
             database_name=database_name,
+            read_only=read_only,
         ) as store:
             if store.read_head(self._head_name) is None:
                 missing = True
@@ -678,7 +709,7 @@ class Continuity:
             conflicted = False
             with (
                 _database_lock(self._state_home, database_name),
-                self._open_session_store() as store,
+                self._open_session_store(read_only=False) as store,
             ):
                 head = store.read_head(self._head_name)
                 if head is None:
@@ -705,6 +736,10 @@ class Continuity:
                 if snapshot_b != snapshot_a or not self._capture_matches_checkpoint(
                     checkpoint_parent,
                     snapshot_a,
+                ) or not _snapshot_matches_policy(
+                    snapshot_a, self._loaded_policy
+                ) or not _snapshot_matches_policy(
+                    snapshot_b, self._loaded_policy
                 ):
                     evaluation = _forced_refusal(evaluation)
                 if not evaluation.transition_allowed:
@@ -715,7 +750,9 @@ class Continuity:
                     created_at=self._clock.now(),
                 )
                 snapshot_c = self._adapter.capture(instruction_paths)
-                if snapshot_c != snapshot_a:
+                if snapshot_c != snapshot_a or not _snapshot_matches_policy(
+                    snapshot_c, self._loaded_policy
+                ):
                     changed = evaluate_checkpoint_capture(
                         checkpoint_parent,
                         snapshot_a,
@@ -803,6 +840,10 @@ class Continuity:
             if snapshot_b != snapshot_a or not self._capture_matches_checkpoint(
                 typed_checkpoint,
                 snapshot_a,
+            ) or not _snapshot_matches_policy(
+                snapshot_a, self._loaded_policy
+            ) or not _snapshot_matches_policy(
+                snapshot_b, self._loaded_policy
             ):
                 return _forced_refusal(result)
             return result

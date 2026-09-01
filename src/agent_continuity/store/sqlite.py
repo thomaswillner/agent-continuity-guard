@@ -317,6 +317,7 @@ class SQLiteStateStore:
         store_id: str | None = None,
         fault_injector: FaultInjector | None = None,
         trusted_anchor: AuditAnchorV1 | None = None,
+        read_only: bool = False,
     ) -> None:
         if type(state_root) is not ExternalStateRoot:
             raise StoreValidationError(
@@ -330,6 +331,8 @@ class SQLiteStateStore:
             raise StoreValidationError("SQLite database name is invalid")
         if trusted_anchor is not None and type(trusted_anchor) is not AuditAnchorV1:
             raise StoreValidationError("trusted anchor must be AuditAnchorV1 or null")
+        if type(read_only) is not bool:
+            raise StoreValidationError("read-only mode must be an exact boolean")
         self._validate_supplied_store_id(store_id)
         self._state_root: ExternalStateRoot | None = state_root
         self._database_name = database_name
@@ -339,6 +342,7 @@ class SQLiteStateStore:
         self._memory = False
         self._fault_injector = fault_injector
         self._trusted_anchor = trusted_anchor
+        self._read_only = read_only
         self._closed = False
         self._connection: sqlite3.Connection
         created = False
@@ -347,9 +351,9 @@ class SQLiteStateStore:
             try:
                 self._database_fd = self._open_database_descriptor(create=False)
             except FileNotFoundError:
-                if store_id is None:
+                if read_only or store_id is None:
                     raise StoreValidationError(
-                        "new SQLite store requires a store ID"
+                        "read-only or unidentified SQLite store must already exist"
                     ) from None
                 if trusted_anchor is not None:
                     raise StoreIntegrityError(
@@ -376,33 +380,38 @@ class SQLiteStateStore:
                         "new SQLite StateStore failed self-validation"
                     )
             else:
-                read_only = self._connect(read_only=True, initialize_journal=False)
+                verified = self._connect(read_only=True, initialize_journal=False)
                 try:
-                    _validate_frozen_schema(read_only)
+                    _validate_frozen_schema(verified)
                     self._store_id = self._initialize_metadata_on(
-                        read_only, store_id, allow_initialize=False
+                        verified, store_id, allow_initialize=False
                     )
                     valid, _head, matched = self._verify_state(
-                        read_only, anchor=trusted_anchor
+                        verified, anchor=trusted_anchor
                     )
                     if not valid or (trusted_anchor is not None and not matched):
                         raise StoreIntegrityError(
                             "existing SQLite StateStore failed full verification"
                         )
-                finally:
-                    read_only.close()
-                self._assert_database_live()
-                self._connection = self._connect(
-                    read_only=False, initialize_journal=False
-                )
-                _validate_frozen_schema(self._connection)
-                valid, _head, matched = self._verify_state(
-                    self._connection, anchor=trusted_anchor
-                )
-                if not valid or (trusted_anchor is not None and not matched):
-                    raise StoreIntegrityError(
-                        "existing SQLite StateStore changed during open"
+                except Exception:
+                    verified.close()
+                    raise
+                if read_only:
+                    self._connection = verified
+                else:
+                    verified.close()
+                    self._assert_database_live()
+                    self._connection = self._connect(
+                        read_only=False, initialize_journal=False
                     )
+                    _validate_frozen_schema(self._connection)
+                    valid, _head, matched = self._verify_state(
+                        self._connection, anchor=trusted_anchor
+                    )
+                    if not valid or (trusted_anchor is not None and not matched):
+                        raise StoreIntegrityError(
+                            "existing SQLite StateStore changed during open"
+                        )
             self._assert_database_live()
         except Exception:
             connection = getattr(self, "_connection", None)
@@ -433,6 +442,7 @@ class SQLiteStateStore:
         self._memory = True
         self._fault_injector = fault_injector
         self._trusted_anchor = None
+        self._read_only = False
         self._closed = False
         self._connection = sqlite3.connect(
             ":memory:", isolation_level=None, timeout=5.0
@@ -566,6 +576,10 @@ class SQLiteStateStore:
             except FileNotFoundError:
                 continue
             self._validate_database_metadata(metadata)
+            if self._read_only:
+                raise StoreIntegrityError(
+                    "read-only SQLite store refuses recovery sidecars"
+                )
 
     def _connect(
         self,
@@ -948,6 +962,10 @@ class SQLiteStateStore:
         head_updates: Sequence[HeadUpdate],
     ) -> MultiHeadCommitReceipt:
         self._ensure_open()
+        if self._read_only:
+            raise StoreValidationError(
+                "read-only SQLite store rejects transactions"
+            )
         self._assert_database_live()
         if type(event) is not AuditEventDraft:
             raise StoreValidationError("event must be an exact AuditEventDraft")
