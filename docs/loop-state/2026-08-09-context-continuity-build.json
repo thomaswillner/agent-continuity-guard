@@ -1,6 +1,6 @@
 {
   "schema_version": "acg_build_loop_state_v1",
-  "revision": 43,
+  "revision": 44,
   "contract": {
     "revision": 3,
     "goal": {
@@ -124,7 +124,8 @@
       "Plan 2 Task 2 strict Citation/v1 and Evidence/v1 contracts are complete at commits 4df0a692db6a6d4fbb74364bc081a0f2d20e5b39 and 002df32a482b0d0b13b52d59d715664c5ce5a622. Final maker report sha256:551220b572ae415f1c6930fce4b48c01980aa803e396d0c4f2a5144b1820413f records genuine fix RED 2 failed/9 passed for bounded Citation spans and 2 failed/12 passed for Evidence proof/null semantics, followed by 25 focused and 616 full tests, 27 schemas, strict mypy over 32 source files, Ruff, build, clean-wheel nullable round trip, exact owned paths, and DCO sign-off.",
       "Independent Task 3 review sha256:a1158c7cd35dfa3d30bc619a1c004b5a38e34897efa807a2bda0929bf55b9b9a found three Important gaps: nullable digests mutated during decode, Citation spans could exceed supplied bytes, and production Evidence construction injected fixture-like deterministic proof defaults. Fix package sha256:70d7546019dabeb6e3b627c47b186499ecc828e3c249a2d853cfdad618e69792 and scoped re-review sha256:a31e561075d637c5ede8dadebcd4ffcf2ab77a59a6a790b93fc4930551cb2da9 close all three with no new Critical or Important breakage. One direct-payload-construction Minor is deferred to final review.",
       "Plan 2 Task 3 direct and transitive Evidence invalidation is complete at commit 68bec4b91f58bd19c2f32554ad16e5bcb1276b6e. Maker report sha256:fcf4fc5d06000ba3b0703e5bb0df0667a9c7e99d6a27e15b1a269b1420d3612b records genuine missing-module RED, purity RED and repair, one bounded Self-Refine pass, 139 focused tests, a killed planted mutant, two purity tests, 755 full tests, strict mypy over 33 files, Ruff, 27 schemas, offline build, clean-wheel canary, exact seven-path scope, and DCO sign-off.",
-      "Independent Task 4 review sha256:69b85bcc4ea0d4e7d533eb856e32377df6380a4ab68a2894f5528fd2657f8bd4 approved specification compliance and task quality with no Critical, Important, or Minor findings. It reconciled the read-only glm-5.2 challenge sha256:c5a7e86e41cd8ba41239d9e68d43a82ac3e26cf52ac4e65ba31d53d7f8e2e6ec by refuting API-creep and forged-cycle concerns and classifying Finding deduplication as unsupported for this pure-evaluation slice. The checker verified artifact and owned-file hashes but did not rerun maker suites; served GLM 5.3 identity remains unsupported or unknown."
+      "Independent Task 4 review sha256:69b85bcc4ea0d4e7d533eb856e32377df6380a4ab68a2894f5528fd2657f8bd4 approved specification compliance and task quality with no Critical, Important, or Minor findings. It reconciled the read-only glm-5.2 challenge sha256:c5a7e86e41cd8ba41239d9e68d43a82ac3e26cf52ac4e65ba31d53d7f8e2e6ec by refuting API-creep and forged-cycle concerns and classifying Finding deduplication as unsupported for this pure-evaluation slice. The checker verified artifact and owned-file hashes but did not rerun maker suites; served GLM 5.3 identity remains unsupported or unknown.",
+      "Plan 2 Task 4 and overlay Task 3 Steps 3-5 are complete at commit 14a8bf08ec7793b16e4b79229eb79016e0a82a1d, tree e05194dd92010ce032ee22ecbc549cc1102bc273, on remote branch auto/1. The accepted 21-path slice adds cohesive private SQLite and Continuity seams, strict ResumeContext/v1, read-only resume, deterministic stale/corrupt refusal, stable policy and ruleset re-observation, kernel-consistent optional invalidation, and scrubbed public exception links. Independent standards review passed with 849 full tests; final literal profile-matrix and canonical-byte oracle checks passed 19 focused tests; installed-wheel verification passed 2 tests; strict mypy, Ruff, 28 schemas, Graphify freshness, DCO, clean-worktree, and local/remote equality gates passed."
     ],
     "delta": [
       "Corrected Plan 1 genesis storage contract: explicitly supplied goal and acceptance criteria may be SensitiveLocalValueDraft rows; prompts, transcripts, source excerpts, and secrets remain forbidden.",
@@ -163,7 +164,8 @@
       "Closed Plan 2 Task 1 only after independent review separated index membership from present tracked-worktree bytes, replaced a generic subprocess seam with fixed Git command admission, normalized ephemeral filesystem failures to UNKNOWN, and made target manifests detect same-byte identity replacement. These proof boundaries are reusable for later resume and no-target-write gates.",
       "Task 2 coordination caught an unauthorized capture root-export change before commit and admitted only two justified fix-test paths. One maker plus immutable package plus fresh checker preserved source ownership while the ledger and loop state retained progress across long waits.",
       "Closed Plan 2 Task 2 only after independent review forced absence to remain explicit: nullable digests round-trip as null, Citation factories reject out-of-bounds spans, and production Evidence construction requires caller-supplied proof-bearing values. Fixture convenience remains in tests and verifier inputs rather than authority-bearing runtime constructors.",
-      "Closed Plan 2 Task 3 only after bounded Self-Refine added missing required-dependency and citation-observation UNKNOWN controls, a provider-pinned read-only glm-5.2 challenge handed off its concerns, and a separate non-GLM checker approved the immutable package with no findings. Model review remained advisory and did not replace deterministic maker gates or checker independence."
+      "Closed Plan 2 Task 3 only after bounded Self-Refine added missing required-dependency and citation-observation UNKNOWN controls, a provider-pinned read-only glm-5.2 challenge handed off its concerns, and a separate non-GLM checker approved the immutable package with no findings. Model review remained advisory and did not replace deterministic maker gates or checker independence.",
+      "Closed Plan 2 Task 4 without waiver only after independent probes reproduced and repaired unstable policy observation, optional-citation false blocking, private exception chaining, runtime/schema blocker-code divergence, mutable nested ResumeContext values, and two self-derived verification oracles. The final accepted tree is stacked as the exact base for issue 3 assignment and result lineage; benchmark and production-readiness claims remain pending."
     ]
   },
   "gates": [
@@ -221,7 +223,7 @@
     },
     "used": {
       "retries_per_failure_fingerprint": 0,
-      "implementation_plan_tasks": 12,
+      "implementation_plan_tasks": 13,
       "task4_fix_rounds": 5,
       "task4_post_breaker_attempts": 1,
       "task4_post_breaker_reviews": 1,
@@ -231,11 +233,11 @@
     }
   },
   "failure_fingerprint": {
-    "gate": "evidence_resume_lineage.task4.resume_context_and_internal_seams",
-    "symptom": "ResumeContext, read-only resume orchestration, stale-checkpoint refusal, and the required first-touch SQLite and Continuity internal seams remain unimplemented; current public behavior must be frozen before api.py or SQLite changes.",
-    "evidence_signature": "docs/plans/2026-08-08-02-evidence-resume-lineage.md:439-527 plus docs/superpowers/plans/2026-09-01-safe-simple-completion.md overlay Task 3 Steps 3-5",
-    "hypothesis": "Public characterization tests can freeze exports, signatures, exception and context-manager semantics, and canonical output before extracting cohesive private SQLite lifecycle/transaction/audit seams and Continuity use-case operations; strict ResumeContext RED can then drive read-only orchestration through those seams while exact store heads and guarded targets remain unchanged."
+    "gate": "evidence_resume_lineage.task5.assignment_contracts",
+    "symptom": "Strict same-machine Assignment/v1 and AssignmentResult/v1 contracts, delegation, sealed result acceptance, exact replay, conflicting replay refusal, and atomic recovery are not implemented.",
+    "evidence_signature": "GitHub issue 3 plus docs/plans/2026-08-08-02-evidence-resume-lineage.md:545-855 and docs/superpowers/plans/2026-09-01-safe-simple-completion.md overlay Task 4",
+    "hypothesis": "Strict parent, target, instruction, policy, ruleset, scope, authority, evidence, expiry, producer, and checkpoint bindings can drive public same-machine delegation and atomic result acceptance through existing StateStore CAS without export/import or runtime-specific adapters."
   },
-  "next_action": "Commit revision-43 Plan 2 Task 3 acceptance state, verify current Prime controller admission and ownership without OpenClaw access, then freeze one composite brief for overlay Task 3 Steps 3-5 plus detailed Plan 2 Task 4 and dispatch exactly one Prime TDD maker; no concurrent product-code maker.",
+  "next_action": "Commit revision-44 issue-1 acceptance and issue-3 admission state on stacked branch auto/3, then dispatch exactly one Prime TDD maker for overlay Task 4 and Plan 2 Tasks 5-6; no concurrent product-code maker and no context-handoff or benchmark work before independent assignment-lineage acceptance.",
   "verdict": "IN_PROGRESS"
 }
