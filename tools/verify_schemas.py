@@ -34,6 +34,7 @@ from agent_continuity.kernel.evidence import (
     evidence_v1,
 )
 from agent_continuity.kernel.findings import Finding
+from agent_continuity.kernel.invalidation import EvidenceState, Invalidation
 from agent_continuity.kernel.model import (
     AssignmentAuthority,
     Digest,
@@ -59,6 +60,7 @@ from agent_continuity.kernel.records import (
     build_ruleset,
     criterion_payload,
 )
+from agent_continuity.kernel.resume import ResumeContext, resume_context_payload
 from agent_continuity.output import ErrorRecord, error_payload
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -234,6 +236,70 @@ def _semantic_validate(name: str, instance: dict[str, Any]) -> None:
         elif name == "evidence.schema.json":
             evidence = evidence_from_payload(instance)
             if evidence_payload(evidence) != instance:
+                raise SchemaVerificationError("invalid_instance")
+        elif name == "resume-context.schema.json":
+            criteria = tuple(
+                CriterionV1(
+                    criterion_id=RecordId(item["criterion_id"]),
+                    ordinal=item["ordinal"],
+                    digest=Digest(item["digest"]),
+                )
+                for item in instance["acceptance_criteria"]
+            )
+            pending_work = tuple(
+                WorkItemV1(
+                    work_item_id=RecordId(item["work_item_id"]),
+                    kind=item["kind"],
+                    status_code=item["status_code"],
+                    digest=Digest(item["digest"]),
+                )
+                for item in instance["pending_work"]
+            )
+            unresolved = tuple(
+                UnresolvedItemV1(
+                    unresolved_id=RecordId(item["unresolved_id"]),
+                    code=item["code"],
+                    digest=(
+                        None
+                        if item["digest"] is None
+                        else Digest(item["digest"])
+                    ),
+                )
+                for item in instance["unresolved"]
+            )
+            invalidations = tuple(
+                Invalidation(
+                    evidence_id=RecordId(item["evidence_id"]),
+                    state=EvidenceState(item["state"]),
+                    code=item["code"],
+                    direct_cause_ids=_record_ids(item["direct_cause_ids"]),
+                    transitive_path=_record_ids(item["transitive_path"]),
+                )
+                for item in instance["invalidations"]
+            )
+            context = ResumeContext(
+                checkpoint_id=RecordId(instance["checkpoint_id"]),
+                verdict=Verdict(instance["verdict"]),
+                usable=instance["usable"],
+                target_id=RecordId(instance["target_id"]),
+                goal_digest=Digest(instance["goal_digest"]),
+                acceptance_criteria=criteria,
+                constraint_digests=tuple(
+                    Digest(value) for value in instance["constraint_digests"]
+                ),
+                accepted_decision_ids=_record_ids(
+                    instance["accepted_decision_ids"]
+                ),
+                pending_work=pending_work,
+                unresolved=unresolved,
+                open_assignment_ids=_record_ids(instance["open_assignment_ids"]),
+                current_evidence_ids=_record_ids(
+                    instance["current_evidence_ids"]
+                ),
+                invalidations=invalidations,
+                blocker_codes=tuple(instance["blocker_codes"]),
+            )
+            if resume_context_payload(context) != instance:
                 raise SchemaVerificationError("invalid_instance")
         elif name == "verification-result.schema.json":
             findings = tuple(
@@ -494,6 +560,44 @@ def schema_goldens() -> dict[str, dict[str, Any]]:
             "version": "1.0",
         },
         "ruleset.schema.json": {"rule_ids": []},
+        "resume-context.schema.json": {
+            "acceptance_criteria": [criterion_payload(criterion)],
+            "accepted_decision_ids": [digest],
+            "blocker_codes": ["evidence.expired"],
+            "checkpoint_id": digest,
+            "constraint_digests": [digest],
+            "current_evidence_ids": [],
+            "goal_digest": digest,
+            "invalidations": [
+                {
+                    "code": "evidence.expired",
+                    "direct_cause_ids": [],
+                    "evidence_id": digest,
+                    "state": "invalidated",
+                    "transitive_path": [digest],
+                }
+            ],
+            "open_assignment_ids": [digest],
+            "pending_work": [
+                {
+                    "digest": digest,
+                    "kind": "task",
+                    "status_code": "pending",
+                    "work_item_id": digest,
+                }
+            ],
+            "schema": "ResumeContext/v1",
+            "target_id": digest,
+            "unresolved": [
+                {
+                    "code": "unknown",
+                    "digest": None,
+                    "unresolved_id": digest,
+                }
+            ],
+            "usable": False,
+            "verdict": "block",
+        },
         "target-identity.schema.json": {
             "adapter_id": "acg-git",
             "adapter_version": "1",

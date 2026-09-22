@@ -1,0 +1,318 @@
+{
+  "$defs": {
+    "criterion": {
+      "additionalProperties": false,
+      "properties": {
+        "criterion_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "ordinal": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "criterion_id",
+        "digest",
+        "ordinal"
+      ],
+      "type": "object"
+    },
+    "digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "findingCode": {
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.-]{0,127}$",
+      "type": "string"
+    },
+    "invalidation": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "current"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "const": ""
+              },
+              "direct_cause_ids": {
+                "maxItems": 0
+              },
+              "transitive_path": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "invalidated",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "citation.file_changed",
+                  "citation.path_missing",
+                  "citation.span_changed",
+                  "evidence.checkpoint_mismatch",
+                  "evidence.dependency_cycle",
+                  "evidence.dependency_invalid",
+                  "evidence.dependency_unknown",
+                  "evidence.expired",
+                  "evidence.observation_unavailable",
+                  "evidence.producer_mismatch",
+                  "evidence.target_mismatch"
+                ]
+              },
+              "transitive_path": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "",
+            "citation.file_changed",
+            "citation.path_missing",
+            "citation.span_changed",
+            "evidence.checkpoint_mismatch",
+            "evidence.dependency_cycle",
+            "evidence.dependency_invalid",
+            "evidence.dependency_unknown",
+            "evidence.expired",
+            "evidence.observation_unavailable",
+            "evidence.producer_mismatch",
+            "evidence.target_mismatch"
+          ]
+        },
+        "direct_cause_ids": {
+          "items": {
+            "$ref": "#/$defs/digest"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "evidence_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "state": {
+          "enum": [
+            "current",
+            "invalidated",
+            "unknown"
+          ]
+        },
+        "transitive_path": {
+          "items": {
+            "$ref": "#/$defs/digest"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "code",
+        "direct_cause_ids",
+        "evidence_id",
+        "state",
+        "transitive_path"
+      ],
+      "type": "object"
+    },
+    "publicComponent": {
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$",
+      "type": "string"
+    },
+    "unresolvedItem": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/publicComponent"
+        },
+        "digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unresolved_id": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "code",
+        "digest",
+        "unresolved_id"
+      ],
+      "type": "object"
+    },
+    "workItem": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "kind": {
+          "$ref": "#/$defs/publicComponent"
+        },
+        "status_code": {
+          "$ref": "#/$defs/publicComponent"
+        },
+        "work_item_id": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "digest",
+        "kind",
+        "status_code",
+        "work_item_id"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://agent-continuity-guard.dev/schemas/v1/resume-context.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "acceptance_criteria": {
+      "items": {
+        "$ref": "#/$defs/criterion"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "accepted_decision_ids": {
+      "items": {
+        "$ref": "#/$defs/digest"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "blocker_codes": {
+      "items": {
+        "$ref": "#/$defs/findingCode"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "checkpoint_id": {
+      "$ref": "#/$defs/digest"
+    },
+    "constraint_digests": {
+      "items": {
+        "$ref": "#/$defs/digest"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "current_evidence_ids": {
+      "items": {
+        "$ref": "#/$defs/digest"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "goal_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "invalidations": {
+      "items": {
+        "$ref": "#/$defs/invalidation"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "open_assignment_ids": {
+      "items": {
+        "$ref": "#/$defs/digest"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "pending_work": {
+      "items": {
+        "$ref": "#/$defs/workItem"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema": {
+      "const": "ResumeContext/v1"
+    },
+    "target_id": {
+      "$ref": "#/$defs/digest"
+    },
+    "unresolved": {
+      "items": {
+        "$ref": "#/$defs/unresolvedItem"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "usable": {
+      "type": "boolean"
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "warn",
+        "unknown",
+        "block"
+      ]
+    }
+  },
+  "required": [
+    "acceptance_criteria",
+    "accepted_decision_ids",
+    "blocker_codes",
+    "checkpoint_id",
+    "constraint_digests",
+    "current_evidence_ids",
+    "goal_digest",
+    "invalidations",
+    "open_assignment_ids",
+    "pending_work",
+    "schema",
+    "target_id",
+    "unresolved",
+    "usable",
+    "verdict"
+  ],
+  "title": "ResumeContext/v1",
+  "type": "object",
+  "x-record-type": "ResumeContext/v1"
+}

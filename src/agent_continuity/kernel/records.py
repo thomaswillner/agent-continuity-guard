@@ -56,6 +56,7 @@ SCHEMA_REGISTRY: dict[str, str] = {
     "ProducerIdentity/v1": "producer-identity.schema.json",
     "Goal/v1": "goal.schema.json",
     "Ruleset/v1": "ruleset.schema.json",
+    "ResumeContext/v1": "resume-context.schema.json",
     "TargetIdentity/v1": "target-identity.schema.json",
     "UnresolvedItem/v1": "unresolved-item.schema.json",
     "VerificationResult/v1": "verification-result.schema.json",
@@ -511,6 +512,10 @@ def encode_record(value: object) -> StoredRecord:
     from .citation import CitationV1
     from .evidence import EvidenceV1
 
+    if type(value) is ActorV1:
+        return value.record()
+    if type(value) is GoalV1:
+        return value.record()
     if type(value) is CitationV1:
         return value.record()
     if type(value) is EvidenceV1:
@@ -538,7 +543,51 @@ def decode_record(value: StoredRecord) -> object:
     if value.schema_version != "v1":
         raise RecordSchemaError("schema version is unsupported")
 
-    if value.record_type == "Citation":
+    if value.record_type == "Actor":
+        if set(payload) != {"authority", "producer", "scope_ids"}:
+            raise RecordSchemaError("stored Actor record fields are invalid")
+        producer_payload = payload["producer"]
+        scope_ids = payload["scope_ids"]
+        if type(producer_payload) is not dict or set(producer_payload) != {
+            "digest",
+            "name",
+            "version",
+        }:
+            raise RecordSchemaError("stored Actor producer fields are invalid")
+        if type(scope_ids) is not list or any(
+            type(item) is not str for item in scope_ids
+        ):
+            raise RecordSchemaError("stored Actor scope IDs are invalid")
+        try:
+            decoded_actor = build_actor(
+                producer=ProducerIdentity(
+                    name=_record_string(producer_payload, "name"),
+                    version=_record_string(producer_payload, "version"),
+                    digest=Digest(_record_string(producer_payload, "digest")),
+                ),
+                authority=AssignmentAuthority(_record_string(payload, "authority")),
+                scope_ids=tuple(
+                    RecordId(_record_list_string(item)) for item in scope_ids
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise RecordSchemaError("stored Actor record is invalid") from error
+        expected = encode_record(decoded_actor)
+        if expected != value:
+            raise RecordSchemaError("stored record identity is invalid")
+        return decoded_actor
+    if value.record_type == "Goal":
+        if set(payload) != {"digest"}:
+            raise RecordSchemaError("stored Goal record fields are invalid")
+        try:
+            decoded_goal = build_goal(Digest(_record_string(payload, "digest")))
+        except (KeyError, TypeError, ValueError) as error:
+            raise RecordSchemaError("stored Goal record is invalid") from error
+        expected = encode_record(decoded_goal)
+        if expected != value:
+            raise RecordSchemaError("stored record identity is invalid")
+        return decoded_goal
+    elif value.record_type == "Citation":
         from .citation import citation_from_payload
 
         decoded_citation = citation_from_payload(payload)
@@ -556,6 +605,19 @@ def decode_record(value: StoredRecord) -> object:
         return decoded_evidence
     else:
         raise RecordSchemaError("record type is unsupported")
+
+
+def _record_string(payload: JsonObject, field: str) -> str:
+    value = payload[field]
+    if type(value) is not str:
+        raise RecordSchemaError("stored record field is invalid")
+    return value
+
+
+def _record_list_string(value: object) -> str:
+    if type(value) is not str:
+        raise RecordSchemaError("stored record field is invalid")
+    return value
 
 
 def producer_identity_payload(producer: ProducerIdentity) -> JsonObject:
