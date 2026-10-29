@@ -1,8 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Agent",
-      "Bash",
       "Edit",
       "Glob",
       "Grep",
@@ -12,7 +10,22 @@
       "WebFetch",
       "WebSearch",
       "Write",
-      "mcp__*"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git push *)",
+      "Bash(git switch *)"
+    ],
+    "deny": [
+      "Read(./**/.env)",
+      "Read(./**/*.key)",
+      "Read(./**/*.pem)",
+      "Edit(./**/.env)",
+      "Edit(./**/*.key)",
+      "Edit(./**/*.pem)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
     ]
   }
 }
