@@ -1,0 +1,46 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.8"
+          enable-cache: false
+      - name: Install pinned linter with managed Python
+        run: |
+          uv python install 3.13.15
+          uv venv --managed-python --python 3.13.15 "$RUNNER_TEMP/lint-venv"
+          uv pip install --python "$RUNNER_TEMP/lint-venv/bin/python" --require-hashes -r ci/requirements-lint.txt
+          echo "$RUNNER_TEMP/lint-venv/bin" >> "$GITHUB_PATH"
+      - name: Lint repository
+        run: ruff check src/ tests/ tools/
+      - name: Prove lint rejects known-bad code
+        run: |
+          ! ruff check lint-canary/bad.py
+      - name: Verify the canary failed on its finding, not on a linter error
+        run: |
+          set +e
+          ruff check --output-format concise lint-canary/bad.py > "$RUNNER_TEMP/lint-canary.txt"
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lint-canary.txt"
+          test "$result" -eq 1
+          grep -Eq '^lint-canary/bad\.py:[0-9]+:[0-9]+: F821[[:space:]]' "$RUNNER_TEMP/lint-canary.txt"
