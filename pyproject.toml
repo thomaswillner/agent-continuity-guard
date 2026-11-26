@@ -54,6 +54,8 @@ mypy_path = "src"
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+# The known-bad lint canary is linted only by its own CI step, by explicit path.
+extend-exclude = ["lint-canary"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
